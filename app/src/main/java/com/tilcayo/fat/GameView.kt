@@ -386,6 +386,17 @@ class GameView(context: Context) : View(context) {
             }
             return
         }
+        // секретное меню: 5 быстрых тапов в правом верхнем углу главного меню
+        if (scene == Scene.MENU && rx > width - 120f && ry < 120f) {
+            val now = System.currentTimeMillis()
+            debugTaps = if (now - lastDebugTap < 600L) debugTaps + 1 else 1
+            lastDebugTap = now
+            if (debugTaps >= 5) {
+                debugTaps = 0
+                DebugMenu.show(context, save)
+            }
+            return
+        }
         val ux = (rx - uiOx) / ui
         val uy = (ry - uiOy) / ui
         if (scene == Scene.DEAD && sceneTime < 0.5f) return
@@ -741,6 +752,18 @@ class GameView(context: Context) : View(context) {
     // Рисование: общее
     // =====================================================================
 
+    /** Тёмная + радужная тема. Поставь false, чтобы вернуть старые цвета. */
+    private val RAINBOW_DARK = true
+    private val hsv = FloatArray(3)
+    private fun rainbow(offset: Float = 0f, alpha: Int = 255): Int {
+        hsv[0] = ((anim * 40f + offset) % 360f + 360f) % 360f
+        hsv[1] = 0.85f
+        hsv[2] = 1f
+        return android.graphics.Color.HSVToColor(alpha, hsv)
+    }
+    private var debugTaps = 0
+    private var lastDebugTap = 0L
+
     private fun lerpColor(a: Int, b: Int, t: Float) = argb.evaluate(t.coerceIn(0f, 1f), a, b) as Int
 
     private val skyTop = intArrayOf(k(0xFF1B1035), k(0xFF0B2A4A), k(0xFF053B2F), k(0xFF3A0F2E), k(0xFF050510))
@@ -755,10 +778,19 @@ class GameView(context: Context) : View(context) {
     }
 
     private fun drawBackground(c: Canvas, top: Int, bottom: Int, scroll: Float, withStars: Boolean = true) {
+        val topCol = if (RAINBOW_DARK) k(0xFF05030F) else top
+        val botCol = if (RAINBOW_DARK) lerpColor(k(0xFF0A0618), rainbow(0f), 0.25f) else bottom
         p.style = Paint.Style.FILL
         p.color = 0xFF000000.toInt() // альфа краски домножается на шейдер, поэтому она обязана быть непрозрачной
-        p.shader = LinearGradient(0f, 0f, 0f, height.toFloat(), top, bottom, Shader.TileMode.CLAMP)
+        p.shader = LinearGradient(0f, 0f, 0f, height.toFloat(), topCol, botCol, Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), p)
+        if (RAINBOW_DARK) {
+            val cols = IntArray(7) { rainbow(it * 50f, 200) }
+            p.shader = LinearGradient(0f, 0f, width.toFloat(), 0f, cols, null, Shader.TileMode.CLAMP)
+            val bh = height * 0.008f
+            c.drawRect(0f, 0f, width.toFloat(), bh, p)
+            c.drawRect(0f, height - bh, width.toFloat(), height.toFloat(), p)
+        }
         p.shader = null
         if (!withStars) return
         c.save()
@@ -766,7 +798,8 @@ class GameView(context: Context) : View(context) {
         for ((i, s) in stars.withIndex()) {
             val y = (((s.second - scroll * 0.12f * s.third) % viewH) + viewH) % viewH
             val tw = 0.5f + 0.5f * sin(anim * 2f + i)
-            p.color = ((60 + 140 * tw).toInt() shl 24) or 0xFFFFFF
+            val rgb = if (RAINBOW_DARK) (rainbow(i * 25f) and 0xFFFFFF) else 0xFFFFFF
+            p.color = ((60 + 140 * tw).toInt() shl 24) or rgb
             c.drawCircle(s.first, y, s.third * 0.8f, p)
         }
         c.restore()
@@ -808,6 +841,13 @@ class GameView(context: Context) : View(context) {
         c.drawRoundRect(x, y + 4f, x + w, y + h + 4f, 14f, 14f, p)
         p.color = col
         c.drawRoundRect(x, y, x + w, y + h, 14f, 14f, p)
+        if (RAINBOW_DARK && enabled) {
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = 2.5f
+            p.color = rainbow(x * 0.6f + y * 0.3f)
+            c.drawRoundRect(x, y, x + w, y + h, 14f, 14f, p)
+            p.style = Paint.Style.FILL
+        }
         p.color = 0x33FFFFFF
         c.drawRoundRect(x + 4f, y + 3f, x + w - 4f, y + h * 0.48f, 11f, 11f, p)
         if (sub == null) {
@@ -1771,8 +1811,8 @@ class GameView(context: Context) : View(context) {
         c.translate(uiOx, uiOy)
         c.scale(ui, ui)
 
-        text(c, "ТОЛСТЫЙ", 180f, 118f, 54f, k(0xFFFFD54F))
-        text(c, "ТИЛКАЙО", 180f, 176f, 60f, k(0xFFFFFFFF))
+        text(c, "ТОЛСТЫЙ", 180f, 118f, 54f, if (RAINBOW_DARK) rainbow(0f) else k(0xFFFFD54F))
+        text(c, "ТИЛКАЙО", 180f, 176f, 60f, if (RAINBOW_DARK) rainbow(120f) else k(0xFFFFFFFF))
         text(c, "прыгай · собирай · откармливай · размножай", 180f, 206f, 13f, 0xBBFFFFFF.toInt(), maxW = 330f)
 
         val lvl = save.level(save.selected)
