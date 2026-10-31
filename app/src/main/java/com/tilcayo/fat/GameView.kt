@@ -35,7 +35,7 @@ import kotlin.random.Random
  */
 class GameView(context: Context) : View(context) {
 
-    private enum class Scene { MENU, PLAY, DEAD, FARM, WARDROBE, RUSH, MODS }
+    private enum class Scene { MENU, PLAY, DEAD, FARM, WARDROBE, RUSH, MODS, PASS }
     private enum class Mode { NORMAL, RUSH_TIME, RUSH_TRAIN }
     private class Virus(var x: Float, var y: Float, val title: String, val msg: String) { var age = 0f }
 
@@ -94,7 +94,7 @@ class GameView(context: Context) : View(context) {
     // ---------- рисование ----------
     private val save = SaveData(context)
     private val sfx = Sfx(context)
-    private val music = Music()
+    private val music = HalloweenMusic()
     private val sprite: Bitmap = BitmapFactory.decodeResource(resources, R.drawable.tilcayo)
     private val skinBmps = arrayOfNulls<Bitmap>(Skins.all.size)
 
@@ -272,7 +272,7 @@ class GameView(context: Context) : View(context) {
     fun onBack(): Boolean = when (scene) {
         Scene.PLAY -> { paused = !paused; true }
         Scene.WARDROBE -> { if (boxStage == 0) goFarm() else boxStage = 0; true }
-        Scene.RUSH, Scene.MODS -> { goMenu(); true }
+        Scene.RUSH, Scene.MODS, Scene.PASS -> { goMenu(); true }
         Scene.DEAD, Scene.FARM -> { goMenu(); true }
         Scene.MENU -> false
     }
@@ -311,7 +311,20 @@ class GameView(context: Context) : View(context) {
     // Тилкайо Bypass: плавающее меню (кнопка TB)
     // =====================================================================
 
-    private class BpRow(val label: String, val toggle: Boolean, val get: () -> Boolean, val tap: () -> Unit)
+    /** Строка меню TB. kind: 0 переключатель, 1 действие, 2 ползунок (0..1), 3 выбор из вариантов. tap идёт последним, чтобы работал синтаксис BpRow(...) { ... }. */
+    private class BpRow(
+        val label: String,
+        val toggle: Boolean,
+        val get: () -> Boolean,
+        val kind: Int = if (toggle) 0 else 1,
+        val getF: () -> Float = { 0f },
+        val setF: (Float) -> Unit = {},
+        val valueText: () -> String = { "" },
+        val opts: List<String> = emptyList(),
+        val getI: () -> Int = { 0 },
+        val setI: (Int) -> Unit = {},
+        val tap: () -> Unit = {},
+    )
 
     private var bpInfCoins = false
     private var bpInfBoxes = false
@@ -343,6 +356,23 @@ class GameView(context: Context) : View(context) {
     private val hueArr = FloatArray(20)
     private val layerPaint = Paint()
     private val bpPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val bpBgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val bpClip = Path()
+    private var bpPage = 0
+    private var bpAlpha = 0.95f
+    private var bpAnimOn = true
+    private var bpAnimSpeed = 1f
+    private var bpStyle = 0
+    private var bpDepth = 1f
+    private var bpBgBmp: Bitmap? = null
+    private var bpOpenT = 0f
+    private var bpSlider = -1
+    private var bpTrackL = 0f
+    private var bpTrackR = 1f
+    private var bpSegL = 0f
+    private var bpSegR = 1f
+
+    init { bpLoad() }
 
     private fun bpDo(f: () -> String) {
         val m = f()
@@ -353,12 +383,17 @@ class GameView(context: Context) : View(context) {
 
     private val bpRows: List<BpRow> by lazy {
         listOf(
+            BpRow("⚙  Настройки меню", false, { false }) { bpPage = 1 },
             BpRow("∞  Бесконечные монеты", true, { bpInfCoins }) { bpInfCoins = !bpInfCoins },
             BpRow("∞  Бесконечные боксы", true, { bpInfBoxes }) { bpInfBoxes = !bpInfBoxes },
             BpRow("Радужный мир", true, { bpRainbowWorld }) { bpRainbowWorld = !bpRainbowWorld },
             BpRow("Тёмная радужная тема", true, { RAINBOW_DARK }) { RAINBOW_DARK = !RAINBOW_DARK },
             BpRow("Кот-крутилка", true, { bpSpin }) { bpSpin = !bpSpin },
             BpRow("Кот-гигант", true, { bpBig }) { bpBig = !bpBig },
+            BpRow("Хеллоуин-декор", true, { bpHalloween }) { bpHalloween = !bpHalloween },
+            BpRow("Пасс: +500 опыта", false, { false }) {
+                bpDo { passGain(500); "Опыт пасса: ${save.passXp}" }
+            },
             BpRow("+10 000 монет", false, { false }) {
                 bpDo { save.coins += 10_000L; "Монет: ${save.coins}" }
             },
@@ -404,6 +439,38 @@ class GameView(context: Context) : View(context) {
         )
     }
 
+    private val bpSetRows: List<BpRow> by lazy {
+        listOf(
+            BpRow("◀  Назад", false, { false }) { bpPage = 0 },
+            BpRow("Прозрачность фона", false, { false }, kind = 2,
+                getF = { (bpAlpha - 0.25f) / 0.75f },
+                setF = { v -> bpAlpha = 0.25f + 0.75f * v },
+                valueText = { "${(bpAlpha * 100).toInt()}%" }),
+            BpRow("Фон из галереи", false, { false }) { bpPickPhoto() },
+            BpRow("Убрать своё фото", false, { false }) { bpClearPhoto() },
+            BpRow("Анимации", true, { bpAnimOn }) { bpAnimOn = !bpAnimOn; bpSave() },
+            BpRow("Скорость анимаций", false, { false }, kind = 2,
+                getF = { (bpAnimSpeed - 0.25f) / 2.75f },
+                setF = { v -> bpAnimSpeed = 0.25f + 2.75f * v },
+                valueText = { "%.1f×".format(bpAnimSpeed) }),
+            BpRow("Стиль анимации", false, { false }, kind = 3,
+                opts = listOf("Плавно", "Быстро", "Нет"),
+                getI = { bpStyle },
+                setI = { i -> bpStyle = i; bpSave() }),
+            BpRow("Глубина панели", false, { false }, kind = 2,
+                getF = { bpDepth / 1.5f },
+                setF = { v -> bpDepth = 1.5f * v },
+                valueText = { "${(bpDepth * 100).toInt()}%" }),
+        )
+    }
+
+    private fun bpCur(): List<BpRow> = if (bpPage == 0) bpRows else bpSetRows
+
+    private fun bpSetSlider(i: Int, x: Float) {
+        val row = bpCur().getOrNull(i) ?: return
+        row.setF(((x - bpTrackL) / (bpTrackR - bpTrackL)).coerceIn(0f, 1f))
+    }
+
     /** Поворот оттенков всего экрана + чуть больше насыщенности. */
     private fun bpHue(deg: Float) {
         val r = Math.toRadians(deg.toDouble())
@@ -445,7 +512,259 @@ class GameView(context: Context) : View(context) {
         bpPaint.style = Paint.Style.FILL
     }
 
-    private fun drawBypass(c: Canvas) {
+    // =====================================================================
+    // Хеллоуин: декор, пасс
+    // =====================================================================
+
+    private var bpHalloween = true
+
+    /** Луна, летучие мыши, привидения, паутина и тыквы поверх фона (в мировых координатах). */
+    private fun drawHalloweenDecor(c: Canvas) {
+        p.style = Paint.Style.FILL
+        p.shader = null
+        val mx = 292f
+        val my = 96f
+        p.color = 0x33FFB74D
+        c.drawCircle(mx, my, 58f + sin(anim) * 2f, p)
+        p.color = 0x55FFB74D
+        c.drawCircle(mx, my, 46f, p)
+        p.color = 0xEEFFD27A.toInt()
+        c.drawCircle(mx, my, 36f, p)
+        p.color = 0x33B8860B
+        c.drawCircle(mx - 10f, my - 8f, 8f, p)
+        c.drawCircle(mx + 12f, my + 10f, 6f, p)
+        c.drawCircle(mx + 8f, my - 14f, 4f, p)
+        for (i in 0 until 3) {
+            val bx = ((anim * (26f + i * 9f) + i * 140f) % (W + 80f)) - 40f
+            val by = 70f + i * 55f + sin(anim * 3f + i * 2f) * 16f
+            text(c, "🦇", bx, by, 22f + i * 3f, shadow = false)
+        }
+        for (i in 0 until 2) {
+            val gx = 60f + i * 190f + sin(anim * 0.7f + i) * 24f
+            val gy = viewH * (0.34f + i * 0.26f) + sin(anim * 1.1f + i * 3f) * 14f
+            text(c, "👻", gx, gy, 34f, 0x77FFFFFF, shadow = false)
+        }
+        text(c, "🕸️", 22f, 44f, 46f, 0x99FFFFFF.toInt(), shadow = false)
+        if (scene != Scene.PLAY && scene != Scene.DEAD) {
+            for (i in 0 until 6) {
+                text(c, if (i % 3 == 1) "🕯️" else "🎃", 24f + i * 62f, viewH - 6f - (i % 2) * 8f, 30f + (i % 3) * 5f, shadow = false)
+            }
+        }
+    }
+
+    /** Добавляет опыт пасса и сообщает о новом уровне. */
+    private fun passGain(xp: Int) {
+        val before = HPass.level(save)
+        save.passXp = min(save.passXp + xp, HPass.LEVELS * HPass.XP_PER_LEVEL)
+        val after = HPass.level(save)
+        if (after > before) toast("🎃 Хеллоуин-пасс: уровень $after!")
+    }
+
+    private fun claimPass(i: Int) {
+        val msg = HPass.claim(save, i) ?: return
+        sfx.play(Sfx.S.CLICK)
+        toast("🎁 $msg")
+    }
+
+    private fun claimAllPass() {
+        var n = 0
+        for (i in 0 until HPass.LEVELS) if (HPass.claim(save, i) != null) n++
+        if (n > 0) {
+            sfx.play(Sfx.S.CLICK)
+            toast("🎁 Получено наград: $n")
+        }
+    }
+
+    private fun drawPass(c: Canvas) {
+        drawBackground(c, k(0xFF1E0B3A), k(0xFF8A3A00), anim * 20f)
+        c.save()
+        c.translate(uiOx, uiOy)
+        c.scale(ui, ui)
+
+        btn(c, "◀", 10f, 14f, 52f, 44f, k(0xFF5C6BC0)) { goMenu() }
+        text(c, "🎃 ХЕЛЛОУИН-ПАСС", 200f, 46f, 26f, k(0xFFFFB74D), maxW = 270f)
+
+        val lvl = HPass.level(save)
+        panel(c, 14f, 68f, 332f, 46f, 0x66000000)
+        text(c, "Ур. $lvl / ${HPass.LEVELS}", 26f, 98f, 18f, 0xFFFFFFFF.toInt(), Paint.Align.LEFT, maxW = 92f)
+        val frac = if (lvl >= HPass.LEVELS) 1f else (save.passXp % HPass.XP_PER_LEVEL) / HPass.XP_PER_LEVEL.toFloat()
+        p.style = Paint.Style.FILL
+        p.color = 0x55FFFFFF
+        c.drawRoundRect(124f, 82f, 334f, 100f, 9f, 9f, p)
+        if (frac > 0f) {
+            p.color = rainbow(0f)
+            c.drawRoundRect(124f, 82f, 124f + 210f * frac, 100f, 9f, 9f, p)
+        }
+        val xpLabel = if (lvl >= HPass.LEVELS) "МАКС" else "${save.passXp % HPass.XP_PER_LEVEL} / ${HPass.XP_PER_LEVEL} XP"
+        text(c, xpLabel, 229f, 96f, 12f)
+
+        val cw = 78f
+        val ch = 112f
+        val gap = (332f - 4f * cw) / 3f
+        for (i in 0 until HPass.LEVELS) {
+            val x = 14f + (i % 4) * (cw + gap)
+            val y = 124f + (i / 4) * (ch + 6f)
+            val r = HPass.rewards[i]
+            val reached = lvl >= i + 1
+            val claimed = HPass.isClaimed(save, i)
+            val bg = when {
+                claimed -> 0x55007A33
+                reached -> 0xCCFF8F00.toInt()
+                else -> 0x44000000
+            }
+            panel(c, x, y, cw, ch, bg)
+            if (r.skin >= 0) {
+                p.style = Paint.Style.STROKE
+                p.strokeWidth = 2.5f
+                p.color = 0xFFFFD54F.toInt()
+                c.drawRoundRect(x, y, x + cw, y + ch, 16f, 16f, p)
+                p.style = Paint.Style.FILL
+            }
+            text(c, "ур. ${i + 1}", x + 8f, y + 16f, 11f, 0xCCFFFFFF.toInt(), Paint.Align.LEFT, shadow = false)
+            val cx = x + cw / 2f
+            if (r.skin >= 0) {
+                drawTilcayo(c, cx, y + 50f, 22f, 1, 0f, 1f, 1f, 1, r.skin)
+            } else if (r.boxes > 0) {
+                text(c, "🎁", cx, y + 56f, 34f, shadow = false)
+            } else {
+                text(c, "💰", cx, y + 56f, 34f, shadow = false)
+            }
+            text(c, r.label, cx, y + 78f, 11f, 0xFFFFF3C4.toInt(), maxW = cw - 8f)
+            when {
+                claimed -> text(c, "✔ получено", cx, y + 100f, 11f, 0xFF9CFF9C.toInt(), maxW = cw - 8f)
+                reached -> btn(c, "ЗАБРАТЬ", x + 5f, y + ch - 30f, cw - 10f, 26f, k(0xFF00C853)) { claimPass(i) }
+                else -> text(c, "🔒", cx, y + 102f, 14f, 0xAAFFFFFF.toInt(), shadow = false)
+            }
+        }
+
+        val can = HPass.claimable(save)
+        if (can > 0) {
+            btn(c, "ЗАБРАТЬ ВСЁ ($can)", 60f, 724f, 240f, 46f, k(0xFFFF6D00)) { claimAllPass() }
+        } else {
+            text(c, "Опыт даётся за забеги, боссов и босс-раш", 180f, 750f, 12f, 0xAAFFFFFF.toInt(), maxW = 330f)
+        }
+
+        if (toastT > 0f) {
+            val a = min(1f, toastT * 3f)
+            panel(c, 30f, 120f, 300f, 28f, ((a * 200).toInt() shl 24))
+            text(c, toastText, 180f, 140f, 15f, ((a * 255).toInt() shl 24) or 0xFFFFFF, maxW = 280f)
+        }
+        c.restore()
+    }
+
+    private fun bpSave() {
+        context.getSharedPreferences("tb_settings", Context.MODE_PRIVATE).edit()
+            .putFloat("alpha", bpAlpha)
+            .putBoolean("animOn", bpAnimOn)
+            .putFloat("animSpeed", bpAnimSpeed)
+            .putInt("style", bpStyle)
+            .putFloat("depth", bpDepth)
+            .apply()
+    }
+
+    private fun bpLoad() {
+        val sp = context.getSharedPreferences("tb_settings", Context.MODE_PRIVATE)
+        bpAlpha = sp.getFloat("alpha", 0.95f)
+        bpAnimOn = sp.getBoolean("animOn", true)
+        bpAnimSpeed = sp.getFloat("animSpeed", 1f)
+        bpStyle = sp.getInt("style", 0)
+        bpDepth = sp.getFloat("depth", 1f)
+        val f = java.io.File(context.filesDir, "tb_bg.jpg")
+        if (f.exists()) bpBgBmp = BitmapFactory.decodeFile(f.path)
+    }
+
+    private fun bpPickPhoto() {
+        var cx: Context = context
+        while (cx is android.content.ContextWrapper && cx !is android.app.Activity) cx = cx.baseContext
+        val act = cx as? android.app.Activity
+        if (act == null) {
+            toast("Галерея недоступна")
+            return
+        }
+        try {
+            val f = PhotoPickFragment()
+            f.onPicked = { uri -> if (uri != null) bpSetPhoto(uri) }
+            act.fragmentManager.beginTransaction().add(f, "tbpick").commitNow()
+            val i = android.content.Intent(android.content.Intent.ACTION_GET_CONTENT)
+            i.type = "image/*"
+            i.addCategory(android.content.Intent.CATEGORY_OPENABLE)
+            f.startActivityForResult(i, PhotoPickFragment.REQ)
+        } catch (e: Exception) {
+            toast("Не удалось открыть галерею")
+        }
+    }
+
+    private fun bpSetPhoto(uri: android.net.Uri) {
+        try {
+            val cr = context.contentResolver
+            val o = BitmapFactory.Options()
+            o.inJustDecodeBounds = true
+            cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o) }
+            var ss = 1
+            while (max(o.outWidth, o.outHeight) / ss > 1100) ss *= 2
+            val o2 = BitmapFactory.Options()
+            o2.inSampleSize = ss
+            val bmp = cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o2) }
+            if (bmp == null) {
+                toast("Не удалось прочитать фото")
+                return
+            }
+            java.io.File(context.filesDir, "tb_bg.jpg").outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 88, it) }
+            bpBgBmp = bmp
+            toast("Фон меню изменён")
+        } catch (e: Exception) {
+            toast("Не удалось прочитать фото")
+        }
+    }
+
+    private fun bpClearPhoto() {
+        java.io.File(context.filesDir, "tb_bg.jpg").delete()
+        bpBgBmp = null
+        toast("Фото убрано")
+    }
+
+    private val bpPath = Path()
+
+    /** Подпись внизу меню: иконка Telegram + «автор чита - @m3v3r». */
+    private fun bpFooter(c: Canvas, px: Float, bottom: Float, pw: Float, d: Float) {
+        val label = "автор чита - @m3v3r"
+        val ts = 13f * d
+        tp.textSize = ts
+        val tw = tp.measureText(label)
+        val iconR = 10f * d
+        val total = iconR * 2f + 8f * d + tw
+        val startX = px + pw / 2f - total / 2f
+        val cx = startX + iconR
+        val cy = bottom - 24f * d
+
+        // синий круг
+        bpPaint.style = Paint.Style.FILL
+        bpPaint.color = 0xFF2AABEE.toInt()
+        c.drawCircle(cx, cy, iconR, bpPaint)
+        // бумажный самолётик
+        bpPath.reset()
+        bpPath.moveTo(cx - 5.2f * d, cy - 0.2f * d)
+        bpPath.lineTo(cx + 5.4f * d, cy - 4.4f * d)
+        bpPath.lineTo(cx + 2.6f * d, cy + 4.8f * d)
+        bpPath.lineTo(cx - 0.6f * d, cy + 1.8f * d)
+        bpPath.close()
+        bpPaint.color = 0xFFFFFFFF.toInt()
+        c.drawPath(bpPath, bpPaint)
+        bpPath.reset()
+        bpPath.moveTo(cx - 0.6f * d, cy + 1.8f * d)
+        bpPath.lineTo(cx - 1.1f * d, cy + 4.6f * d)
+        bpPath.lineTo(cx + 1.4f * d, cy + 2.9f * d)
+        bpPath.close()
+        bpPaint.color = 0xFFC8DAEA.toInt()
+        c.drawPath(bpPath, bpPaint)
+
+        text(
+            c, label, startX + iconR * 2f + 8f * d, cy + ts * 0.35f, ts, 0xFFCCCCCC.toInt(),
+            align = Paint.Align.LEFT, shadow = false,
+        )
+    }
+
+    private fun drawBypass(c: Canvas, dt: Float) {
         val d = resources.displayMetrics.density
         val sz = 52f * d
         if (fabX < 0f) {
@@ -456,54 +775,123 @@ class GameView(context: Context) : View(context) {
         fabY = fabY.coerceIn(0f, max(0f, height - sz))
         fabRect.set(fabX, fabY, fabX + sz, fabY + sz)
 
-        if (bpOpen) {
-            val rows = bpRows
+        // анимация открытия панели
+        val target = if (bpOpen) 1f else 0f
+        val step = if (!bpAnimOn || bpStyle == 2) 1f else if (bpStyle == 1) dt * 14f else dt * 5f
+        bpOpenT = if (bpOpenT < target) min(target, bpOpenT + step) else max(target, bpOpenT - step)
+
+        if (bpOpenT > 0.01f) {
+            val ease = bpOpenT * (2f - bpOpenT)
+            val rows = bpCur()
             val pw = min(width - 24f * d, 340f * d)
             val headH = 58f * d
-            val padB = 14f * d
+            val padB = 44f * d
             val maxH = height - 40f * d
             val rowH = min(42f * d, (maxH - headH - padB) / rows.size)
             val ph = headH + rowH * rows.size + padB
             val px = (width - pw) / 2f
             val py = ((height - ph) / 2f).coerceAtLeast(20f * d)
             bpPx = px; bpPy = py; bpPw = pw; bpPh = ph; bpRowH = rowH; bpHeadH = headH
+            bpTrackL = px + pw * 0.47f
+            bpTrackR = px + pw - 12f * d - 52f * d
+            bpSegL = px + pw * 0.40f
+            bpSegR = px + pw - 12f * d
+
+            val layered = ease < 0.999f
+            if (layered) c.saveLayerAlpha(0f, 0f, width.toFloat(), height.toFloat(), (ease * 255).toInt())
 
             bpPaint.style = Paint.Style.FILL
-            bpPaint.color = 0x88000000.toInt()
+            bpPaint.color = ((0x88 * bpAlpha).toInt() shl 24)
             c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bpPaint)
 
+            val sc = 0.92f + 0.08f * ease
+            c.save()
+            c.scale(sc, sc, px + pw / 2f, py + ph / 2f)
             panelRect.set(px, py, px + pw, py + ph)
-            bpFrame(c, panelRect, 18f * d, 3f * d, 0xF2101018.toInt())
-            text(c, "Тилкайо  Bypass", px + pw / 2f, py + 38f * d, 24f * d, rainbow(0f), shadow = false, maxW = pw - 30f * d)
+
+            if (bpDepth > 0.01f) {
+                bpPaint.color = (min(255f, 0x66 * bpDepth).toInt() shl 24)
+                c.drawRoundRect(px, py + 8f * d * bpDepth, px + pw, py + ph + 8f * d * bpDepth, 18f * d, 18f * d, bpPaint)
+            }
+
+            val photo = bpBgBmp
+            if (photo != null) {
+                bpClip.reset()
+                bpClip.addRoundRect(panelRect, 18f * d, 18f * d, Path.Direction.CW)
+                c.save()
+                c.clipPath(bpClip)
+                val s = max(pw / photo.width, ph / photo.height)
+                val dw = photo.width * s
+                val dh = photo.height * s
+                bpRect.set(px + (pw - dw) / 2f, py + (ph - dh) / 2f, px + (pw + dw) / 2f, py + (ph + dh) / 2f)
+                bpBgPaint.alpha = (bpAlpha * 255).toInt()
+                c.drawBitmap(photo, null, bpRect, bpBgPaint)
+                bpPaint.color = ((bpAlpha * 0.4f * 255).toInt() shl 24)
+                c.drawRect(panelRect, bpPaint)
+                c.restore()
+                bpFrame(c, panelRect, 18f * d, 3f * d, 0)
+            } else {
+                bpFrame(c, panelRect, 18f * d, 3f * d, ((bpAlpha * 242).toInt() shl 24) or 0x101018)
+            }
+
+            text(c, if (bpPage == 0) "Тилкайо  Bypass" else "Настройки", px + pw / 2f, py + 38f * d, 24f * d, rainbow(0f), shadow = false, maxW = pw - 30f * d)
 
             for ((i, row) in rows.withIndex()) {
                 val top = py + headH + i * rowH
                 bpRect.set(px + 12f * d, top + 2f * d, px + pw - 12f * d, top + rowH - 2f * d)
                 bpPaint.style = Paint.Style.FILL
-                bpPaint.color = if (row.toggle) 0x26FFFFFF else 0x14FFFFFF
+                bpPaint.color = if (row.kind == 1) 0x14FFFFFF else 0x26FFFFFF
                 c.drawRoundRect(bpRect, 10f * d, 10f * d, bpPaint)
                 val ts = min(15f * d, rowH * 0.4f)
-                text(
-                    c, row.label, bpRect.left + 12f * d, bpRect.centerY() + ts * 0.35f, ts,
-                    align = Paint.Align.LEFT, shadow = false, maxW = pw - 100f * d,
-                )
-                if (row.toggle) {
-                    val on = row.get()
-                    val tw = 44f * d
-                    val th = min(24f * d, rowH * 0.6f)
-                    val tr = bpRect.right - 12f * d
-                    val tl = tr - tw
-                    val tcy = bpRect.centerY()
-                    bpRect2.set(tl, tcy - th / 2f, tr, tcy + th / 2f)
-                    bpPaint.color = if (on) rainbow(i * 40f) else 0xFF555566.toInt()
-                    c.drawRoundRect(bpRect2, th / 2f, th / 2f, bpPaint)
-                    bpPaint.color = 0xFFFFFFFF.toInt()
-                    val kx = if (on) tr - th / 2f else tl + th / 2f
-                    c.drawCircle(kx, tcy, th / 2f - 3f * d, bpPaint)
-                } else {
-                    text(c, "▶", bpRect.right - 20f * d, bpRect.centerY() + ts * 0.35f, ts, 0xFFAAAAAA.toInt(), shadow = false)
+                val labW = if (row.kind >= 2) pw * 0.30f else pw - 100f * d
+                text(c, row.label, bpRect.left + 12f * d, bpRect.centerY() + ts * 0.35f, ts, align = Paint.Align.LEFT, shadow = false, maxW = labW)
+                val cy = bpRect.centerY()
+                when (row.kind) {
+                    0 -> {
+                        val on = row.get()
+                        val tw = 44f * d
+                        val th = min(24f * d, rowH * 0.6f)
+                        val tr = bpRect.right - 12f * d
+                        val tl = tr - tw
+                        bpRect2.set(tl, cy - th / 2f, tr, cy + th / 2f)
+                        bpPaint.color = if (on) rainbow(i * 40f) else 0xFF555566.toInt()
+                        c.drawRoundRect(bpRect2, th / 2f, th / 2f, bpPaint)
+                        bpPaint.color = 0xFFFFFFFF.toInt()
+                        val kx = if (on) tr - th / 2f else tl + th / 2f
+                        c.drawCircle(kx, cy, th / 2f - 3f * d, bpPaint)
+                    }
+                    1 -> text(c, "▶", bpRect.right - 20f * d, cy + ts * 0.35f, ts, 0xFFAAAAAA.toInt(), shadow = false)
+                    2 -> {
+                        val v = row.getF().coerceIn(0f, 1f)
+                        val th = 6f * d
+                        bpRect2.set(bpTrackL, cy - th / 2f, bpTrackR, cy + th / 2f)
+                        bpPaint.color = 0x55FFFFFF
+                        c.drawRoundRect(bpRect2, th / 2f, th / 2f, bpPaint)
+                        val kx = bpTrackL + (bpTrackR - bpTrackL) * v
+                        bpRect2.set(bpTrackL, cy - th / 2f, kx, cy + th / 2f)
+                        bpPaint.color = rainbow(i * 40f)
+                        c.drawRoundRect(bpRect2, th / 2f, th / 2f, bpPaint)
+                        bpPaint.color = 0xFFFFFFFF.toInt()
+                        c.drawCircle(kx, cy, 8f * d, bpPaint)
+                        text(c, row.valueText(), bpRect.right - 8f * d, cy + ts * 0.3f, ts * 0.85f, align = Paint.Align.RIGHT, shadow = false, maxW = 46f * d)
+                    }
+                    3 -> {
+                        val n = row.opts.size
+                        val cwid = (bpSegR - bpSegL) / n
+                        val sel = row.getI()
+                        for (q in 0 until n) {
+                            bpRect2.set(bpSegL + q * cwid + 2f * d, bpRect.top + 4f * d, bpSegL + (q + 1) * cwid - 2f * d, bpRect.bottom - 4f * d)
+                            bpPaint.color = if (q == sel) rainbow(q * 60f) else 0x33FFFFFF
+                            c.drawRoundRect(bpRect2, 8f * d, 8f * d, bpPaint)
+                            text(c, row.opts[q], bpRect2.centerX(), bpRect2.centerY() + ts * 0.3f, ts * 0.75f,
+                                if (q == sel) 0xFF101018.toInt() else 0xFFFFFFFF.toInt(), shadow = false, maxW = cwid - 6f * d)
+                        }
+                    }
                 }
             }
+            bpFooter(c, px, py + ph, pw, d)
+            c.restore()
+            if (layered) c.restore()
         }
 
         bpFrame(c, fabRect, 14f * d, 3f * d, 0xF2121218.toInt())
@@ -518,6 +906,7 @@ class GameView(context: Context) : View(context) {
             val y = e.y
             fabDown = false
             bpConsume = false
+            bpSlider = -1
             if (fabRect.contains(x, y)) {
                 fabDown = true
                 fabMoved = false
@@ -530,11 +919,29 @@ class GameView(context: Context) : View(context) {
             if (bpOpen) {
                 bpConsume = true
                 if (x >= bpPx && x <= bpPx + bpPw && y >= bpPy && y <= bpPy + bpPh) {
+                    val rows = bpCur()
                     val i = ((y - bpPy - bpHeadH) / bpRowH).toInt()
-                    if (y >= bpPy + bpHeadH && i in bpRows.indices) {
-                        performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        sfx.play(Sfx.S.CLICK)
-                        bpRows[i].tap()
+                    if (y >= bpPy + bpHeadH && i in rows.indices) {
+                        val row = rows[i]
+                        when (row.kind) {
+                            2 -> {
+                                bpSlider = i
+                                bpSetSlider(i, x)
+                            }
+                            3 -> {
+                                if (x >= bpSegL) {
+                                    val n = row.opts.size
+                                    val q = (((x - bpSegL) / (bpSegR - bpSegL)) * n).toInt().coerceIn(0, n - 1)
+                                    performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    row.setI(q)
+                                }
+                            }
+                            else -> {
+                                performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                sfx.play(Sfx.S.CLICK)
+                                row.tap()
+                            }
+                        }
                     }
                 } else {
                     bpOpen = false
@@ -545,20 +952,29 @@ class GameView(context: Context) : View(context) {
         }
         if (!fabDown && !bpConsume) return false
         when (act) {
-            MotionEvent.ACTION_MOVE -> if (fabDown) {
-                val x = e.x
-                val y = e.y
-                if (hypot(x - fabSX, y - fabSY) > 12f * resources.displayMetrics.density) fabMoved = true
-                if (fabMoved) {
-                    fabX = x - fabDX
-                    fabY = y - fabDY
+            MotionEvent.ACTION_MOVE -> {
+                if (fabDown) {
+                    val x = e.x
+                    val y = e.y
+                    if (hypot(x - fabSX, y - fabSY) > 12f * resources.displayMetrics.density) fabMoved = true
+                    if (fabMoved) {
+                        fabX = x - fabDX
+                        fabY = y - fabDY
+                    }
+                } else if (bpSlider >= 0) {
+                    bpSetSlider(bpSlider, e.x)
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (fabDown && !fabMoved && act == MotionEvent.ACTION_UP) {
                     bpOpen = !bpOpen
+                    if (bpOpen) bpPage = 0
                     if (bpOpen && scene == Scene.PLAY) paused = true
                     sfx.play(Sfx.S.CLICK)
+                }
+                if (bpSlider >= 0) {
+                    bpSlider = -1
+                    bpSave()
                 }
                 fabDown = false
                 bpConsume = false
@@ -571,7 +987,7 @@ class GameView(context: Context) : View(context) {
         val now = System.nanoTime()
         val dt = ((now - last) / 1e9f).coerceIn(0f, 0.05f)
         last = now
-        anim += dt
+        anim += dt * (if (bpAnimOn) bpAnimSpeed else 0f)
         sceneTime += dt
         toastT = max(0f, toastT - dt)
         buttons.clear()
@@ -594,6 +1010,7 @@ class GameView(context: Context) : View(context) {
             Scene.WARDROBE -> drawWardrobe(c, dt)
             Scene.RUSH -> drawRush(c)
             Scene.MODS -> drawMods(c)
+            Scene.PASS -> drawPass(c)
             Scene.PLAY, Scene.DEAD -> {
                 if (scene == Scene.PLAY && !paused) {
                     var rem = dt
@@ -612,7 +1029,7 @@ class GameView(context: Context) : View(context) {
             }
         }
         if (bpLayer) c.restore()
-        drawBypass(c)
+        drawBypass(c, dt)
         postInvalidateOnAnimation()
     }
 
@@ -952,6 +1369,7 @@ class GameView(context: Context) : View(context) {
             if (rushFirstWin) save.freeBoxes++
             earned = rushReward
         }
+        passGain(if (win) 60 else 15)
         save.save()
         deathReason = if (win) "" else sim.deathReason
         sfx.play(if (win) Sfx.S.BOSS_DEAD else Sfx.S.DEATH)
@@ -973,6 +1391,7 @@ class GameView(context: Context) : View(context) {
         save.coins += earned
         val score = (-sim.minPy / 10f).toInt()
         if (score > save.best) save.best = score
+        passGain(10 + max(0, score) / 3)
         save.save()
         sfx.play(Sfx.S.DEATH)
         performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
@@ -1074,6 +1493,7 @@ class GameView(context: Context) : View(context) {
             p.color = ((60 + 140 * tw).toInt() shl 24) or rgb
             c.drawCircle(s.first, y, s.third * 0.8f, p)
         }
+        if (bpHalloween) drawHalloweenDecor(c)
         c.restore()
     }
 
@@ -2103,6 +2523,12 @@ class GameView(context: Context) : View(context) {
         btn(c, "⚙  МОДИФИКАТОРЫ", 50f, 622f, 200f, 56f, k(0xFF00897B),
             sub = if (mc > 0) "$mc вкл · монеты x" + "%.2f".format(Mods.multiplier(save.mods)) else "нет") { scene = Scene.MODS; sceneTime = 0f }
         btn(c, if (save.sound) "🔊" else "🔇", 258f, 622f, 52f, 56f, k(0xFF5C6BC0)) { toggleSound() }
+        val passLvl = HPass.level(save)
+        val passCan = HPass.claimable(save)
+        btn(c, "🎃  ХЕЛЛОУИН-ПАСС", 50f, 690f, 260f, 56f, k(0xFFFF6D00),
+            sub = if (passCan > 0) "ур. $passLvl / ${HPass.LEVELS} · наград: $passCan" else "ур. $passLvl / ${HPass.LEVELS}") {
+            scene = Scene.PASS; sceneTime = 0f
+        }
 
         // плашка «доступно обновление» — только в главном меню
         if (save.remoteCode > installedCode && save.dismissedCode != save.remoteCode) {

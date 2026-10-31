@@ -36,6 +36,8 @@ class Skin(
     val alpha: Float = 1f,
     /** Имя картинки в res/drawable-nodpi (без .png). null — обычный тилкайо. */
     val sprite: String? = null,
+    /** Скин выдаётся только наградой (не падает из боксов). */
+    val passOnly: Boolean = false,
 ) {
     val plain = hue == 0f && sat == 1f && mul[0] == 1f && mul[1] == 1f && mul[2] == 1f && add == 0f && fx != FX_RAINBOW
 
@@ -69,6 +71,8 @@ object Skins {
         Skin("Пузатый марги", Rarity.LEGEND, sprite = "puzaty_margi"),
         Skin("Пузико клод", Rarity.LEGEND, sprite = "puziko_claude"),
         Skin("Нарезанный♥️", Rarity.LEGEND, sprite = "narezanny"),
+        Skin("Хеллоуинский Маргит", Rarity.LEGEND, sprite = "margit_halloween", passOnly = true),
+        Skin("Хеллоуинский тилкайо", Rarity.LEGEND, sprite = "tilcayo_halloween", passOnly = true),
     )
 
     private val cache = arrayOfNulls<ColorMatrixColorFilter>(all.size)
@@ -128,7 +132,7 @@ object Boxes {
             x -= box.odds[r]
             if (x < 0) { rarity = r; break }
         }
-        val pool = Skins.all.indices.filter { Skins.all[it].rarity == rarity }
+        val pool = Skins.all.indices.filter { Skins.all[it].rarity == rarity && !Skins.all[it].passOnly }
         return pool[rnd.nextInt(pool.size)]
     }
 }

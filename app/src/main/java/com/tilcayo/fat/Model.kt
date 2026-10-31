@@ -100,6 +100,10 @@ class SaveData(context: Context) {
     /** Бесплатные боксы (за победу над боссом). */
     var freeBoxes: Int = sp.getInt("freeBoxes", 0)
 
+    /** Хеллоуин-пасс: опыт и забранные награды (битовая маска по уровням). */
+    var passXp: Int = sp.getInt("passXp", 0)
+    var passClaimed: Int = sp.getInt("passClaimed", 0)
+
     val farms: List<Farm> = List(Farms.COUNT) { i ->
         val sfx = if (i == 0) "" else "$i"
         Farm().also { f ->
@@ -213,6 +217,8 @@ class SaveData(context: Context) {
             .putInt("activeFarm", activeFarm)
             .putLong("ownedSkins", ownedSkins)
             .putInt("freeBoxes", freeBoxes)
+            .putInt("passXp", passXp)
+            .putInt("passClaimed", passClaimed)
             .putInt("mods", mods)
             .putLong("lastUpdateCheck", lastUpdateCheck)
             .putInt("remoteCode", remoteCode)
