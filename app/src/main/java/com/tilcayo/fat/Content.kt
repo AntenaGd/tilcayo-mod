@@ -34,6 +34,8 @@ class Skin(
     val accOnEyes: Boolean = false,
     val fx: Int = FX_NONE,
     val alpha: Float = 1f,
+    /** Имя картинки в res/drawable-nodpi (без .png). null — обычный тилкайо. */
+    val sprite: String? = null,
 ) {
     val plain = hue == 0f && sat == 1f && mul[0] == 1f && mul[1] == 1f && mul[2] == 1f && add == 0f && fx != FX_RAINBOW
 
@@ -62,6 +64,11 @@ object Skins {
         Skin("Космо", Rarity.EPIC, hue = 200f, mul = floatArrayOf(0.55f, 0.65f, 1.25f), acc = "🛸", fx = Skin.FX_STARS),
         Skin("Золотой король", Rarity.LEGEND, sat = 1.4f, mul = floatArrayOf(1.4f, 1.22f, 0.5f), add = 22f, acc = "👑", fx = Skin.FX_SPARK),
         Skin("Дракончик", Rarity.LEGEND, hue = -30f, sat = 1.7f, mul = floatArrayOf(1.3f, 0.75f, 0.7f), acc = "🔥", fx = Skin.FX_FIRE),
+        Skin("Маргит", Rarity.LEGEND, sprite = "margit"),
+        Skin("Mever (автор чита)", Rarity.LEGEND, sprite = "mever"),
+        Skin("Пузатый марги", Rarity.LEGEND, sprite = "puzaty_margi"),
+        Skin("Пузико клод", Rarity.LEGEND, sprite = "puziko_claude"),
+        Skin("Нарезанный♥️", Rarity.LEGEND, sprite = "narezanny"),
     )
 
     private val cache = arrayOfNulls<ColorMatrixColorFilter>(all.size)

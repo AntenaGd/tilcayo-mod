@@ -96,6 +96,17 @@ class GameView(context: Context) : View(context) {
     private val sfx = Sfx(context)
     private val music = Music()
     private val sprite: Bitmap = BitmapFactory.decodeResource(resources, R.drawable.tilcayo)
+    private val skinBmps = arrayOfNulls<Bitmap>(Skins.all.size)
+
+    /** Картинка для скина: свой спрайт персонажа или обычный тилкайо. */
+    private fun spriteFor(skin: Int): Bitmap {
+        val name = Skins.all[skin].sprite ?: return sprite
+        skinBmps[skin]?.let { return it }
+        val id = resources.getIdentifier(name, "drawable", context.packageName)
+        val bmp = (if (id != 0) BitmapFactory.decodeResource(resources, id) else null) ?: sprite
+        skinBmps[skin] = bmp
+        return bmp
+    }
     private val bossSprite: Bitmap = BitmapFactory.decodeResource(resources, R.drawable.boss)
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bmpPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -1138,8 +1149,10 @@ class GameView(context: Context) : View(context) {
         sx: Float, sy: Float, level: Int, skin: Int = 0, hidden: Boolean = false,
     ) {
         val sk = Skins.all[skin]
-        val w = rad * 2.5f
-        val h = w * sprite.height / sprite.width
+        val bmp = spriteFor(skin)
+        var w = rad * 2.5f
+        var h = w * bmp.height / bmp.width
+        if (h > w * 1.15f) { val f = w * 1.15f / h; w *= f; h *= f } // высокие картинки чуть уменьшаем
         val cy = if (sk.fx == Skin.FX_GHOST && !hidden) cy0 - rad * 0.12f + sin(anim * 3f) * rad * 0.1f else cy0
         if (sk.fx == Skin.FX_FIRE && !hidden) {
             val fl = 0.85f + 0.2f * sin(anim * 12f)
@@ -1158,7 +1171,7 @@ class GameView(context: Context) : View(context) {
             bmpPaint.colorFilter = Skins.filter(skin, anim)
             bmpPaint.alpha = (sk.alpha * 255).toInt()
         }
-        c.drawBitmap(sprite, null, rect, bmpPaint)
+        c.drawBitmap(bmp, null, rect, bmpPaint)
         bmpPaint.colorFilter = null
         bmpPaint.alpha = 255
         c.restore()
@@ -2791,7 +2804,7 @@ class GameView(context: Context) : View(context) {
         val wearing = save.skinOf(sel)
         text(c, "Надеть на: ${Balance.names[sel % Balance.names.size]} (ур.${save.level(sel)})", 180f, 238f, 15f, 0xFFFFF3C4.toInt(), maxW = 340f)
         val cw = 84f
-        val ch = 98f
+        val ch = 92f
         for ((i, sk) in Skins.all.withIndex()) {
             val col = i % 4
             val row = i / 4
@@ -2805,15 +2818,15 @@ class GameView(context: Context) : View(context) {
             p.color = if (i == wearing) k(0xFFFFFFFF) else (rc and 0x00FFFFFF) or (if (owned) 0xFF000000.toInt() else 0x55000000)
             c.drawRoundRect(x, y, x + cw, y + ch, 12f, 12f, p)
             p.style = Paint.Style.FILL
-            drawTilcayo(c, x + cw / 2, y + 40f, 22f, 1, 0f, 1f, 1f, 1, i, hidden = !owned)
+            drawTilcayo(c, x + cw / 2, y + 37f, 22f, 1, 0f, 1f, 1f, 1, i, hidden = !owned)
             if (owned) {
-                text(c, sk.name, x + cw / 2, y + 79f, 10f, 0xFFFFFFFF.toInt(), maxW = cw - 6f)
+                text(c, sk.name, x + cw / 2, y + 75f, 10f, 0xFFFFFFFF.toInt(), maxW = cw - 6f)
                 if (i == wearing) text(c, "✔", x + cw - 12f, y + 16f, 14f, 0xFF00E676.toInt())
             } else {
-                text(c, "?", x + cw / 2, y + 48f, 26f, 0x88FFFFFF.toInt(), shadow = false)
-                text(c, "???", x + cw / 2, y + 79f, 10f, 0x88FFFFFF.toInt())
+                text(c, "?", x + cw / 2, y + 45f, 26f, 0x88FFFFFF.toInt(), shadow = false)
+                text(c, "???", x + cw / 2, y + 75f, 10f, 0x88FFFFFF.toInt())
             }
-            text(c, Rarity.names[sk.rarity], x + cw / 2, y + 92f, 8f, rc, maxW = cw - 6f)
+            text(c, Rarity.names[sk.rarity], x + cw / 2, y + 87f, 8f, rc, maxW = cw - 6f)
             buttons.add(Btn(x, y, cw, ch) {
                 if (boxStage != 0) return@Btn
                 if (owned) {
