@@ -75,7 +75,7 @@ class HalloweenMusic {
             val t = track ?: return
             try {
                 if (on) t.play() else t.pause()
-            } catch (_: IllegalStateException) {
+            } catch (ex: IllegalStateException) {
             }
         }
     }
@@ -85,7 +85,7 @@ class HalloweenMusic {
         synchronized(lock) {
             try {
                 track?.stop()
-            } catch (_: IllegalStateException) {
+            } catch (ex: IllegalStateException) {
             }
             track?.release()
             track = null

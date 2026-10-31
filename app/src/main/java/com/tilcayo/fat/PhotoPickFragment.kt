@@ -17,7 +17,7 @@ class PhotoPickFragment : Fragment() {
         }
         try {
             fragmentManager?.beginTransaction()?.remove(this)?.commitAllowingStateLoss()
-        } catch (_: Exception) {
+        } catch (ex: Exception) {
         }
     }
 
