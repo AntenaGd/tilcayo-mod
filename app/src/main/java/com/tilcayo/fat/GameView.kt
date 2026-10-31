@@ -295,6 +295,267 @@ class GameView(context: Context) : View(context) {
         uiOy = (h - 800f * ui) / 2f
     }
 
+
+    // =====================================================================
+    // Тилкайо Bypass: плавающее меню (кнопка TB)
+    // =====================================================================
+
+    private class BpRow(val label: String, val toggle: Boolean, val get: () -> Boolean, val tap: () -> Unit)
+
+    private var bpInfCoins = false
+    private var bpInfBoxes = false
+    private var bpRainbowWorld = false
+    private var bpSpin = false
+    private var bpBig = false
+    private var bpOpen = false
+    private var fabX = -1f
+    private var fabY = -1f
+    private var fabDown = false
+    private var fabMoved = false
+    private var fabDX = 0f
+    private var fabDY = 0f
+    private var fabSX = 0f
+    private var fabSY = 0f
+    private var bpConsume = false
+    private var bpPx = 0f
+    private var bpPy = 0f
+    private var bpPw = 0f
+    private var bpPh = 0f
+    private var bpRowH = 1f
+    private var bpHeadH = 0f
+    private val bpRect = RectF()
+    private val bpRect2 = RectF()
+    private val fabRect = RectF()
+    private val panelRect = RectF()
+    private val hueCm = ColorMatrix()
+    private val satCm = ColorMatrix()
+    private val hueArr = FloatArray(20)
+    private val layerPaint = Paint()
+    private val bpPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    private fun bpDo(f: () -> String) {
+        val m = f()
+        save.save()
+        toast(m)
+        if (scene == Scene.FARM) syncPets()
+    }
+
+    private val bpRows: List<BpRow> by lazy {
+        listOf(
+            BpRow("∞  Бесконечные монеты", true, { bpInfCoins }) { bpInfCoins = !bpInfCoins },
+            BpRow("∞  Бесконечные боксы", true, { bpInfBoxes }) { bpInfBoxes = !bpInfBoxes },
+            BpRow("Радужный мир", true, { bpRainbowWorld }) { bpRainbowWorld = !bpRainbowWorld },
+            BpRow("Тёмная радужная тема", true, { RAINBOW_DARK }) { RAINBOW_DARK = !RAINBOW_DARK },
+            BpRow("Кот-крутилка", true, { bpSpin }) { bpSpin = !bpSpin },
+            BpRow("Кот-гигант", true, { bpBig }) { bpBig = !bpBig },
+            BpRow("+10 000 монет", false, { false }) {
+                bpDo { save.coins += 10_000L; "Монет: ${save.coins}" }
+            },
+            BpRow("Открыть все скины", false, { false }) {
+                bpDo {
+                    val n = Skins.all.size
+                    save.ownedSkins = if (n >= 63) -1L else (1L shl n) - 1L
+                    "Скинов открыто: $n"
+                }
+            },
+            BpRow("Открыть все фермы", false, { false }) {
+                bpDo { save.unlocked = Farms.COUNT; "Ферм открыто: ${Farms.COUNT}" }
+            },
+            BpRow("Максимум жира всему стаду", false, { false }) {
+                bpDo {
+                    val herd = save.herd
+                    for (i in herd.indices) herd[i] = Balance.MAX_FAT
+                    "Всё стадо максимально жирное"
+                }
+            },
+            BpRow("Добавить питомца", false, { false }) {
+                bpDo {
+                    if (save.farm.herd.size < Balance.MAX_HERD) {
+                        save.farm.addPet()
+                        save.farm.normalize()
+                        "В стаде: ${save.farm.herd.size}"
+                    } else {
+                        "Стадо уже полное"
+                    }
+                }
+            },
+            BpRow("Родить малыша сейчас", false, { false }) {
+                bpDo {
+                    if (save.pregnant()) {
+                        save.breedEnd = 1L
+                        save.checkBirth()
+                        "Малыш родился"
+                    } else {
+                        "Сейчас никто не вынашивает"
+                    }
+                }
+            },
+        )
+    }
+
+    /** Поворот оттенков всего экрана + чуть больше насыщенности. */
+    private fun bpHue(deg: Float) {
+        val r = Math.toRadians(deg.toDouble())
+        val cs = cos(r).toFloat()
+        val sn = sin(r).toFloat()
+        hueArr[0] = 0.213f + cs * 0.787f - sn * 0.213f
+        hueArr[1] = 0.715f - cs * 0.715f - sn * 0.715f
+        hueArr[2] = 0.072f - cs * 0.072f + sn * 0.928f
+        hueArr[3] = 0f; hueArr[4] = 0f
+        hueArr[5] = 0.213f - cs * 0.213f + sn * 0.143f
+        hueArr[6] = 0.715f + cs * 0.285f + sn * 0.140f
+        hueArr[7] = 0.072f - cs * 0.072f - sn * 0.283f
+        hueArr[8] = 0f; hueArr[9] = 0f
+        hueArr[10] = 0.213f - cs * 0.213f - sn * 0.787f
+        hueArr[11] = 0.715f - cs * 0.715f + sn * 0.715f
+        hueArr[12] = 0.072f + cs * 0.928f + sn * 0.072f
+        hueArr[13] = 0f; hueArr[14] = 0f
+        hueArr[15] = 0f; hueArr[16] = 0f; hueArr[17] = 0f; hueArr[18] = 1f; hueArr[19] = 0f
+        hueCm.set(hueArr)
+        satCm.setSaturation(1.4f)
+        hueCm.postConcat(satCm)
+    }
+
+    /** Скруглённая рамка с бело-чёрной обводкой, цвета которой меняются местами. */
+    private fun bpFrame(c: Canvas, r: RectF, rad: Float, sw: Float, fill: Int) {
+        bpPaint.style = Paint.Style.FILL
+        bpPaint.color = fill
+        c.drawRoundRect(r, rad, rad, bpPaint)
+        val flip = ((anim * 2f).toInt() and 1) == 0
+        val a = if (flip) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
+        val b = if (flip) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
+        bpPaint.style = Paint.Style.STROKE
+        bpPaint.strokeWidth = sw
+        bpPaint.color = a
+        c.drawRoundRect(r, rad, rad, bpPaint)
+        bpRect2.set(r.left + sw, r.top + sw, r.right - sw, r.bottom - sw)
+        bpPaint.color = b
+        c.drawRoundRect(bpRect2, rad - sw, rad - sw, bpPaint)
+        bpPaint.style = Paint.Style.FILL
+    }
+
+    private fun drawBypass(c: Canvas) {
+        val d = resources.displayMetrics.density
+        val sz = 52f * d
+        if (fabX < 0f) {
+            fabX = width - sz - 12f * d
+            fabY = 140f * d
+        }
+        fabX = fabX.coerceIn(0f, max(0f, width - sz))
+        fabY = fabY.coerceIn(0f, max(0f, height - sz))
+        fabRect.set(fabX, fabY, fabX + sz, fabY + sz)
+
+        if (bpOpen) {
+            val rows = bpRows
+            val pw = min(width - 24f * d, 340f * d)
+            val headH = 58f * d
+            val padB = 14f * d
+            val maxH = height - 40f * d
+            val rowH = min(42f * d, (maxH - headH - padB) / rows.size)
+            val ph = headH + rowH * rows.size + padB
+            val px = (width - pw) / 2f
+            val py = ((height - ph) / 2f).coerceAtLeast(20f * d)
+            bpPx = px; bpPy = py; bpPw = pw; bpPh = ph; bpRowH = rowH; bpHeadH = headH
+
+            bpPaint.style = Paint.Style.FILL
+            bpPaint.color = 0x88000000.toInt()
+            c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bpPaint)
+
+            panelRect.set(px, py, px + pw, py + ph)
+            bpFrame(c, panelRect, 18f * d, 3f * d, 0xF2101018.toInt())
+            text(c, "Тилкайо  Bypass", px + pw / 2f, py + 38f * d, 24f * d, rainbow(0f), shadow = false, maxW = pw - 30f * d)
+
+            for ((i, row) in rows.withIndex()) {
+                val top = py + headH + i * rowH
+                bpRect.set(px + 12f * d, top + 2f * d, px + pw - 12f * d, top + rowH - 2f * d)
+                bpPaint.style = Paint.Style.FILL
+                bpPaint.color = if (row.toggle) 0x26FFFFFF else 0x14FFFFFF
+                c.drawRoundRect(bpRect, 10f * d, 10f * d, bpPaint)
+                val ts = min(15f * d, rowH * 0.4f)
+                text(
+                    c, row.label, bpRect.left + 12f * d, bpRect.centerY() + ts * 0.35f, ts,
+                    align = Paint.Align.LEFT, shadow = false, maxW = pw - 100f * d,
+                )
+                if (row.toggle) {
+                    val on = row.get()
+                    val tw = 44f * d
+                    val th = min(24f * d, rowH * 0.6f)
+                    val tr = bpRect.right - 12f * d
+                    val tl = tr - tw
+                    val tcy = bpRect.centerY()
+                    bpRect2.set(tl, tcy - th / 2f, tr, tcy + th / 2f)
+                    bpPaint.color = if (on) rainbow(i * 40f) else 0xFF555566.toInt()
+                    c.drawRoundRect(bpRect2, th / 2f, th / 2f, bpPaint)
+                    bpPaint.color = 0xFFFFFFFF.toInt()
+                    val kx = if (on) tr - th / 2f else tl + th / 2f
+                    c.drawCircle(kx, tcy, th / 2f - 3f * d, bpPaint)
+                } else {
+                    text(c, "▶", bpRect.right - 20f * d, bpRect.centerY() + ts * 0.35f, ts, 0xFFAAAAAA.toInt(), shadow = false)
+                }
+            }
+        }
+
+        bpFrame(c, fabRect, 14f * d, 3f * d, 0xF2121218.toInt())
+        text(c, "TB", fabRect.centerX(), fabRect.centerY() + sz * 0.16f, sz * 0.46f, rainbow(0f), shadow = false)
+    }
+
+    /** Возвращает true, если касание забрала кнопка TB или открытая панель. */
+    private fun bpTouch(e: MotionEvent): Boolean {
+        val act = e.actionMasked
+        if (act == MotionEvent.ACTION_DOWN) {
+            val x = e.x
+            val y = e.y
+            fabDown = false
+            bpConsume = false
+            if (fabRect.contains(x, y)) {
+                fabDown = true
+                fabMoved = false
+                fabDX = x - fabX
+                fabDY = y - fabY
+                fabSX = x
+                fabSY = y
+                return true
+            }
+            if (bpOpen) {
+                bpConsume = true
+                if (x >= bpPx && x <= bpPx + bpPw && y >= bpPy && y <= bpPy + bpPh) {
+                    val i = ((y - bpPy - bpHeadH) / bpRowH).toInt()
+                    if (y >= bpPy + bpHeadH && i in bpRows.indices) {
+                        performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        sfx.play(Sfx.S.CLICK)
+                        bpRows[i].tap()
+                    }
+                } else {
+                    bpOpen = false
+                }
+                return true
+            }
+            return false
+        }
+        if (!fabDown && !bpConsume) return false
+        when (act) {
+            MotionEvent.ACTION_MOVE -> if (fabDown) {
+                val x = e.x
+                val y = e.y
+                if (hypot(x - fabSX, y - fabSY) > 12f * resources.displayMetrics.density) fabMoved = true
+                if (fabMoved) {
+                    fabX = x - fabDX
+                    fabY = y - fabDY
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (fabDown && !fabMoved && act == MotionEvent.ACTION_UP) {
+                    bpOpen = !bpOpen
+                    if (bpOpen && scene == Scene.PLAY) paused = true
+                    sfx.play(Sfx.S.CLICK)
+                }
+                fabDown = false
+                bpConsume = false
+            }
+        }
+        return true
+    }
+
     override fun onDraw(c: Canvas) {
         val now = System.nanoTime()
         val dt = ((now - last) / 1e9f).coerceIn(0f, 0.05f)
@@ -303,11 +564,19 @@ class GameView(context: Context) : View(context) {
         sceneTime += dt
         toastT = max(0f, toastT - dt)
         buttons.clear()
+        if (bpInfCoins && save.coins < 900_000_000L) save.coins = 999_999_999L
+        if (bpInfBoxes && save.freeBoxes < 50) save.freeBoxes = 99
         if (scene != Scene.PLAY && save.checkBirth()) {
             sfx.play(Sfx.S.BREED)
             toast("Родился малыш! 🍼")
         }
 
+        val bpLayer = bpRainbowWorld
+        if (bpLayer) {
+            bpHue(anim * 90f)
+            layerPaint.colorFilter = ColorMatrixColorFilter(hueCm)
+            c.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), layerPaint)
+        }
         when (scene) {
             Scene.MENU -> drawMenu(c)
             Scene.FARM -> drawFarm(c, dt)
@@ -331,6 +600,8 @@ class GameView(context: Context) : View(context) {
                 if (paused) drawPause(c)
             }
         }
+        if (bpLayer) c.restore()
+        drawBypass(c)
         postInvalidateOnAnimation()
     }
 
@@ -339,6 +610,7 @@ class GameView(context: Context) : View(context) {
     // =====================================================================
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (bpTouch(e)) return true
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN ->
                 onDown(e.getPointerId(e.actionIndex), e.getX(e.actionIndex), e.getY(e.actionIndex))
@@ -383,17 +655,6 @@ class GameView(context: Context) : View(context) {
                 sim.onWall -> sim.jump()
                 sim.jumpsLeft > 0 -> { gesturePtr = id; gestureX0 = rx; gestureDone = false }
                 else -> sim.jumpBuf = 0.2f
-            }
-            return
-        }
-        // секретное меню: 5 быстрых тапов в правом верхнем углу главного меню
-        if (scene == Scene.MENU && rx > width - 120f && ry < 120f) {
-            val now = System.currentTimeMillis()
-            debugTaps = if (now - lastDebugTap < 600L) debugTaps + 1 else 1
-            lastDebugTap = now
-            if (debugTaps >= 5) {
-                debugTaps = 0
-                DebugMenu.show(context, save)
             }
             return
         }
@@ -753,7 +1014,7 @@ class GameView(context: Context) : View(context) {
     // =====================================================================
 
     /** Тёмная + радужная тема. Поставь false, чтобы вернуть старые цвета. */
-    private val RAINBOW_DARK = true
+    private var RAINBOW_DARK = true
     private val hsv = FloatArray(3)
     private fun rainbow(offset: Float = 0f, alpha: Int = 255): Int {
         hsv[0] = ((anim * 40f + offset) % 360f + 360f) % 360f
@@ -887,8 +1148,9 @@ class GameView(context: Context) : View(context) {
         }
         c.save()
         c.translate(cx, cy)
-        c.rotate(rot)
-        c.scale(sx * faceDir, sy)
+        c.rotate(rot + (if (bpSpin) anim * 540f else 0f))
+        val bigK = if (bpBig) 1.6f else 1f
+        c.scale(sx * faceDir * bigK, sy * bigK)
         rect.set(-w / 2, -h / 2, w / 2, h / 2)
         if (hidden) {
             bmpPaint.colorFilter = silhouette
