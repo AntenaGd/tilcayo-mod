@@ -2690,11 +2690,11 @@ class GameView(context: Context) : View(context) {
         }
 
         // Верхние счётчики — стеклянные карточки с красной кромкой.
-        panel(c, 18f, 18f, 132f, 32f, 0x88200D1A, 12f)
+        panel(c, 18f, 18f, 132f, 32f, 0x88200D1A.toInt(), 12f)
         p.style = Paint.Style.STROKE; p.strokeWidth = 1f; p.color = 0x66FF4778.toInt()
         c.drawRoundRect(18f, 18f, 150f, 50f, 12f, 12f, p); p.style = Paint.Style.FILL
         text(c, "◈  ${save.coins}", 29f, 39f, 15f, 0xFFFFD9E4.toInt(), Paint.Align.LEFT, maxW = 110f)
-        panel(c, 210f, 18f, 132f, 32f, 0x88200D1A, 12f)
+        panel(c, 210f, 18f, 132f, 32f, 0x88200D1A.toInt(), 12f)
         p.style = Paint.Style.STROKE; p.strokeWidth = 1f; p.color = 0x66FF4778.toInt()
         c.drawRoundRect(210f, 18f, 342f, 50f, 12f, 12f, p); p.style = Paint.Style.FILL
         text(c, "★  ${save.best} m", 222f, 39f, 15f, 0xFFFFEAF0.toInt(), Paint.Align.LEFT, maxW = 110f)
