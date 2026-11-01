@@ -1242,6 +1242,8 @@ class GameView(context: Context) : View(context) {
                     performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                     sfx.play(Sfx.S.JUMP)
                     dust(ev.x, ev.y, 6, 0xFFFFFFFF.toInt())
+                    ring(ev.x, ev.y, 0xFF65E7FF.toInt())
+                    sparkle(ev.x, ev.y, 0xFFC18BFF.toInt())
                 }
                 Ev.AIR -> {
                     sfx.play(Sfx.S.AIR, 1f + (MAX_AIR - sim.jumpsLeft) * 0.12f)
@@ -1254,6 +1256,7 @@ class GameView(context: Context) : View(context) {
                 Ev.LAND -> {
                     sfx.play(Sfx.S.LAND, 0.9f + rnd.nextFloat() * 0.2f, 0.7f)
                     dust(ev.x - sim.side * sim.r * 0.3f, ev.y, 8, 0xFFE0D6FF.toInt())
+                    ring(ev.x, ev.y, 0xFFFFD36E.toInt())
                 }
                 Ev.COIN -> {
                     combo++
@@ -2030,6 +2033,25 @@ class GameView(context: Context) : View(context) {
             val sx = 1f + squash * 0.22f - stretch
             val sy = 1f - squash * 0.22f + stretch
             val faceDir = if (onWall) -side else face
+            // Новые визуальные эффекты: аура в воздухе и короткий цветной след.
+            val airborne = !onWall && abs(pvy) > 45f
+            if (airborne) {
+                val pulse = (sin(anim * 10f) + 1f) * 0.5f
+                p.style = Paint.Style.STROKE
+                p.strokeWidth = 2f + pulse * 1.5f
+                p.color = if (pvy < 0f) 0x995FE8FF.toInt() else 0x99C18BFF.toInt()
+                rect.set(px - r * (1.25f + pulse * 0.12f), py - r * (1.45f + pulse * 0.12f),
+                    px + r * (1.25f + pulse * 0.12f), py + r * (1.45f + pulse * 0.12f))
+                c.drawOval(rect, p)
+                p.style = Paint.Style.FILL
+                // Частицы следа появляются не каждый кадр, чтобы не перегружать телефон.
+                if ((anim * 18f).toInt() % 3 == 0 && particles.size < 180) {
+                    val trailColor = if (pvy < 0f) 0xFF65E7FF.toInt() else 0xFFC18BFF.toInt()
+                    particles.add(Particle(px - faceDir * r * 0.45f, py + r * 0.55f,
+                        (rnd.nextFloat() - 0.5f) * 36f, 35f + rnd.nextFloat() * 45f,
+                        0.28f, 0.28f, trailColor, 2f + rnd.nextFloat() * 2.5f))
+                }
+            }
             // перед срывом тилкайо дрожит, вокруг него тает кольцо «хватки»
             val g = (sim.gripT / Phys.GRIP_TIME)
             val tremble = if (onWall && g > 0.7f) sin(anim * 70f) * (min(1f, g) - 0.7f) * 7f else 0f
