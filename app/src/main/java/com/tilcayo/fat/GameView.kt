@@ -44,6 +44,12 @@ class GameView(context: Context) : View(context) {
         var x: Float, var y: Float, var vx: Float, var vy: Float,
         var life: Float, val maxLife: Float, val color: Int, val size: Float,
     )
+    private class Star(
+        var x: Float, var y: Float, var vx: Float, var vy: Float,
+        var life: Float, val maxLife: Float, val color: Int, val size: Float, var rot: Float, val spin: Float,
+    )
+    private class FxRing(val x: Float, val y: Float, val maxAge: Float, val color: Int, val maxR: Float, val flat: Float) { var age = 0f }
+    private class TrailPt(val x: Float, val y: Float) { var age = 0f }
     private class Pop(val x: Float, val y: Float, val text: String, val color: Int, val size: Float) { var life = 1f }
     private class Btn(val x: Float, val y: Float, val w: Float, val h: Float, val onTap: () -> Unit)
 
@@ -324,13 +330,31 @@ class GameView(context: Context) : View(context) {
         val getI: () -> Int = { 0 },
         val setI: (Int) -> Unit = {},
         val tap: () -> Unit = {},
-    )
+    ) {
+        /** Анимация переключателя 0..1. */
+        var t = 0f
+    }
 
     private var bpInfCoins = false
     private var bpInfBoxes = false
     private var bpRainbowWorld = false
     private var bpSpin = false
     private var bpBig = false
+    private var bpBigSize = 1.6f
+    private var bpGod = false
+    private var bpInfAir = false
+    private var bpNoLava = false
+    private var bpSlow = 1f
+    private var bpJumpMul = 1f
+    private var bpCoinMul = 1f
+    private var bpFxOn = true
+    private var bpFxStars = true
+    private var bpFxRings = true
+    private var bpFxTrail = true
+    private var bpFxAura = true
+    private var bpFxAmbient = true
+    private var bpFxPower = 1f
+    private var bpTabT = 0f
     private var bpOpen = false
     private var fabX = -1f
     private var fabY = -1f
@@ -381,22 +405,51 @@ class GameView(context: Context) : View(context) {
         if (scene == Scene.FARM) syncPets()
     }
 
-    private val bpRows: List<BpRow> by lazy {
-        listOf(
-            BpRow("⚙  Настройки меню", false, { false }) { bpPage = 1 },
-            BpRow("∞  Бесконечные монеты", true, { bpInfCoins }) { bpInfCoins = !bpInfCoins },
-            BpRow("∞  Бесконечные боксы", true, { bpInfBoxes }) { bpInfBoxes = !bpInfBoxes },
+    private val bpTabs = listOf("Игрок", "Мир", "Ресурсы", "Ферма", "Визуал", "Меню")
+
+    private val bpPages: List<List<BpRow>> by lazy {
+        val player = listOf(
+            BpRow("🛡  Бессмертие", true, { bpGod }) { bpGod = !bpGod },
+            BpRow("∞  Бесконечные рывки", true, { bpInfAir }) { bpInfAir = !bpInfAir },
+            BpRow("🚀  Сила прыжка", false, { false }, kind = 2,
+                getF = { (bpJumpMul - 1f) / 2f },
+                setF = { v -> bpJumpMul = 1f + 2f * v },
+                valueText = { "%.1f×".format(bpJumpMul) }),
+            BpRow("⏱  Время", false, { false }, kind = 2,
+                getF = { (bpSlow - 0.2f) / 0.8f },
+                setF = { v -> bpSlow = 0.2f + 0.8f * v },
+                valueText = { "%.1f×".format(bpSlow) }),
+            BpRow("Кот-гигант", true, { bpBig }) { bpBig = !bpBig },
+            BpRow("📏  Размер кота", false, { false }, kind = 2,
+                getF = { (bpBigSize - 0.5f) / 4.5f },
+                setF = { v -> bpBigSize = 0.5f + 4.5f * v; bpBig = true },
+                valueText = { "%.1f×".format(bpBigSize) }),
+            BpRow("Кот-крутилка", true, { bpSpin }) { bpSpin = !bpSpin },
+        )
+        val world = listOf(
+            BpRow("🌋  Лава выключена", true, { bpNoLava }) { bpNoLava = !bpNoLava },
             BpRow("Радужный мир", true, { bpRainbowWorld }) { bpRainbowWorld = !bpRainbowWorld },
             BpRow("Радужная тема (вместо неона)", true, { RAINBOW_DARK }) { RAINBOW_DARK = !RAINBOW_DARK },
-            BpRow("Кот-крутилка", true, { bpSpin }) { bpSpin = !bpSpin },
-            BpRow("Кот-гигант", true, { bpBig }) { bpBig = !bpBig },
             BpRow("Хеллоуин-декор", true, { bpHalloween }) { bpHalloween = !bpHalloween },
-            BpRow("Пасс: +500 опыта", false, { false }) {
-                bpDo { passGain(500); "Опыт пасса: ${save.passXp}" }
-            },
+        )
+        val money = listOf(
+            BpRow("∞  Бесконечные монеты", true, { bpInfCoins }) { bpInfCoins = !bpInfCoins },
+            BpRow("∞  Бесконечные боксы", true, { bpInfBoxes }) { bpInfBoxes = !bpInfBoxes },
+            BpRow("💰  Монеты за забег", false, { false }, kind = 2,
+                getF = { (bpCoinMul - 1f) / 49f },
+                setF = { v -> bpCoinMul = 1f + 49f * v },
+                valueText = { "×" + bpCoinMul.toInt() }),
             BpRow("+10 000 монет", false, { false }) {
                 bpDo { save.coins += 10_000L; "Монет: ${save.coins}" }
             },
+            BpRow("+100 000 монет", false, { false }) {
+                bpDo { save.coins += 100_000L; "Монет: ${save.coins}" }
+            },
+            BpRow("+1 000 000 монет", false, { false }) {
+                bpDo { save.coins += 1_000_000L; "Монет: ${save.coins}" }
+            },
+        )
+        val farm = listOf(
             BpRow("Открыть все скины", false, { false }) {
                 bpDo {
                     val n = Skins.all.size
@@ -436,12 +489,26 @@ class GameView(context: Context) : View(context) {
                     }
                 }
             },
+            BpRow("Пасс: +500 опыта", false, { false }) {
+                bpDo { passGain(500); "Опыт пасса: ${save.passXp}" }
+            },
+            BpRow("Пасс: все уровни", false, { false }) {
+                bpDo { passGain(HPass.LEVELS * HPass.XP_PER_LEVEL); "Опыт пасса: ${save.passXp}" }
+            },
         )
-    }
-
-    private val bpSetRows: List<BpRow> by lazy {
-        listOf(
-            BpRow("◀  Назад", false, { false }) { bpPage = 0 },
+        val visual = listOf(
+            BpRow("✨  Эффекты", true, { bpFxOn }) { bpFxOn = !bpFxOn; bpSave() },
+            BpRow("⭐  Звёзды и искры", true, { bpFxStars }) { bpFxStars = !bpFxStars; bpSave() },
+            BpRow("◎  Кольца прыжков", true, { bpFxRings }) { bpFxRings = !bpFxRings; bpSave() },
+            BpRow("〰  Световой шлейф", true, { bpFxTrail }) { bpFxTrail = !bpFxTrail; bpSave() },
+            BpRow("🌟  Аура кота", true, { bpFxAura }) { bpFxAura = !bpFxAura; bpSave() },
+            BpRow("🌠  Падающие звёзды", true, { bpFxAmbient }) { bpFxAmbient = !bpFxAmbient; bpSave() },
+            BpRow("Сила эффектов", false, { false }, kind = 2,
+                getF = { (bpFxPower - 0.3f) / 1.7f },
+                setF = { v -> bpFxPower = 0.3f + 1.7f * v },
+                valueText = { "%.1f×".format(bpFxPower) }),
+        )
+        val look = listOf(
             BpRow("Прозрачность фона", false, { false }, kind = 2,
                 getF = { (bpAlpha - 0.25f) / 0.75f },
                 setF = { v -> bpAlpha = 0.25f + 0.75f * v },
@@ -462,9 +529,10 @@ class GameView(context: Context) : View(context) {
                 setF = { v -> bpDepth = 1.5f * v },
                 valueText = { "${(bpDepth * 100).toInt()}%" }),
         )
+        listOf(player, world, money, farm, visual, look)
     }
 
-    private fun bpCur(): List<BpRow> = if (bpPage == 0) bpRows else bpSetRows
+    private fun bpCur(): List<BpRow> = bpPages[bpPage.coerceIn(0, bpPages.size - 1)]
 
     private fun bpSetSlider(i: Int, x: Float) {
         val row = bpCur().getOrNull(i) ?: return
@@ -659,6 +727,14 @@ class GameView(context: Context) : View(context) {
             .putFloat("animSpeed", bpAnimSpeed)
             .putInt("style", bpStyle)
             .putFloat("depth", bpDepth)
+            .putFloat("bigSize", bpBigSize)
+            .putBoolean("fxOn", bpFxOn)
+            .putBoolean("fxStars", bpFxStars)
+            .putBoolean("fxRings", bpFxRings)
+            .putBoolean("fxTrail", bpFxTrail)
+            .putBoolean("fxAura", bpFxAura)
+            .putBoolean("fxAmb", bpFxAmbient)
+            .putFloat("fxPower", bpFxPower)
             .apply()
     }
 
@@ -669,6 +745,14 @@ class GameView(context: Context) : View(context) {
         bpAnimSpeed = sp.getFloat("animSpeed", 1f)
         bpStyle = sp.getInt("style", 0)
         bpDepth = sp.getFloat("depth", 1f)
+        bpBigSize = sp.getFloat("bigSize", 1.6f)
+        bpFxOn = sp.getBoolean("fxOn", true)
+        bpFxStars = sp.getBoolean("fxStars", true)
+        bpFxRings = sp.getBoolean("fxRings", true)
+        bpFxTrail = sp.getBoolean("fxTrail", true)
+        bpFxAura = sp.getBoolean("fxAura", true)
+        bpFxAmbient = sp.getBoolean("fxAmb", true)
+        bpFxPower = sp.getFloat("fxPower", 1f)
         val f = java.io.File(context.filesDir, "tb_bg.jpg")
         if (f.exists()) bpBgBmp = BitmapFactory.decodeFile(f.path)
     }
@@ -777,18 +861,22 @@ class GameView(context: Context) : View(context) {
 
         // анимация открытия панели
         val target = if (bpOpen) 1f else 0f
-        val step = if (!bpAnimOn || bpStyle == 2) 1f else if (bpStyle == 1) dt * 14f else dt * 5f
+        val fast = !bpAnimOn || bpStyle == 2
+        val step = if (fast) 1f else if (bpStyle == 1) dt * 14f else dt * 5f
         bpOpenT = if (bpOpenT < target) min(target, bpOpenT + step) else max(target, bpOpenT - step)
+        bpTabT += (bpPage - bpTabT) * min(1f, dt * (if (fast) 100f else 14f))
 
         if (bpOpenT > 0.01f) {
             val ease = bpOpenT * (2f - bpOpenT)
             val rows = bpCur()
-            val pw = min(width - 24f * d, 340f * d)
-            val headH = 58f * d
+            var maxRows = 1
+            for (pg in bpPages) if (pg.size > maxRows) maxRows = pg.size
+            val pw = min(width - 24f * d, 344f * d)
+            val headH = 96f * d
             val padB = 44f * d
             val maxH = height - 40f * d
-            val rowH = min(42f * d, (maxH - headH - padB) / rows.size)
-            val ph = headH + rowH * rows.size + padB
+            val rowH = min(44f * d, (maxH - headH - padB) / maxRows)
+            val ph = headH + rowH * maxRows + padB
             val px = (width - pw) / 2f
             val py = ((height - ph) / 2f).coerceAtLeast(20f * d)
             bpPx = px; bpPy = py; bpPw = pw; bpPh = ph; bpRowH = rowH; bpHeadH = headH
@@ -800,89 +888,169 @@ class GameView(context: Context) : View(context) {
             val layered = ease < 0.999f
             if (layered) c.saveLayerAlpha(0f, 0f, width.toFloat(), height.toFloat(), (ease * 255).toInt())
 
+            // затемнение экрана с виньеткой
             bpPaint.style = Paint.Style.FILL
-            bpPaint.color = ((0x88 * bpAlpha).toInt() shl 24)
+            bpPaint.color = ((0x99 * bpAlpha).toInt() shl 24)
             c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bpPaint)
+            bpPaint.shader = RadialGradient(
+                width / 2f, height / 2f, max(width, height) * 0.75f,
+                0x00000000, 0x88000000.toInt(), Shader.TileMode.CLAMP,
+            )
+            c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bpPaint)
+            bpPaint.shader = null
 
             val sc = 0.92f + 0.08f * ease
             c.save()
             c.scale(sc, sc, px + pw / 2f, py + ph / 2f)
             panelRect.set(px, py, px + pw, py + ph)
+            val rad = 24f * d
 
+            // неоновое свечение вокруг панели
             if (bpDepth > 0.01f) {
-                bpPaint.color = (min(255f, 0x66 * bpDepth).toInt() shl 24)
-                c.drawRoundRect(px, py + 8f * d * bpDepth, px + pw, py + ph + 8f * d * bpDepth, 18f * d, 18f * d, bpPaint)
+                for (g in 4 downTo 1) {
+                    val e = g * 5f * d * min(1.5f, bpDepth)
+                    bpRect.set(px - e, py - e + 8f * d, px + pw + e, py + ph + e + 8f * d)
+                    bpPaint.color = withA(rainbow(g * 30f), 14 + 6 * (4 - g))
+                    c.drawRoundRect(bpRect, rad + e, rad + e, bpPaint)
+                }
             }
 
             val photo = bpBgBmp
             if (photo != null) {
                 bpClip.reset()
-                bpClip.addRoundRect(panelRect, 18f * d, 18f * d, Path.Direction.CW)
+                bpClip.addRoundRect(panelRect, rad, rad, Path.Direction.CW)
                 c.save()
                 c.clipPath(bpClip)
-                val s = max(pw / photo.width, ph / photo.height)
-                val dw = photo.width * s
-                val dh = photo.height * s
+                val s2 = max(pw / photo.width, ph / photo.height)
+                val dw = photo.width * s2
+                val dh = photo.height * s2
                 bpRect.set(px + (pw - dw) / 2f, py + (ph - dh) / 2f, px + (pw + dw) / 2f, py + (ph + dh) / 2f)
                 bpBgPaint.alpha = (bpAlpha * 255).toInt()
                 c.drawBitmap(photo, null, bpRect, bpBgPaint)
-                bpPaint.color = ((bpAlpha * 0.4f * 255).toInt() shl 24)
+                bpPaint.color = ((bpAlpha * 0.45f * 255).toInt() shl 24)
                 c.drawRect(panelRect, bpPaint)
                 c.restore()
-                bpFrame(c, panelRect, 18f * d, 3f * d, 0)
             } else {
-                bpFrame(c, panelRect, 18f * d, 3f * d, ((bpAlpha * 242).toInt() shl 24) or 0x101018)
+                val fa = (bpAlpha * 245).toInt()
+                bpPaint.shader = LinearGradient(
+                    px, py, px, py + ph,
+                    intArrayOf(withA(0xFF22102F.toInt(), fa), withA(0xFF110818.toInt(), fa), withA(0xFF08040C.toInt(), fa)),
+                    floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP,
+                )
+                c.drawRoundRect(panelRect, rad, rad, bpPaint)
+                bpPaint.shader = null
+            }
+            // стеклянный блик сверху
+            bpRect.set(px + 3f * d, py + 3f * d, px + pw - 3f * d, py + 46f * d)
+            bpPaint.shader = LinearGradient(0f, py, 0f, py + 46f * d, 0x1EFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP)
+            c.drawRoundRect(bpRect, rad - 3f * d, rad - 3f * d, bpPaint)
+            bpPaint.shader = null
+            // бегущий градиентный контур
+            bpPaint.style = Paint.Style.STROKE
+            bpPaint.strokeWidth = 2.2f * d
+            bpPaint.shader = LinearGradient(
+                px, py, px + pw, py + ph,
+                intArrayOf(rainbow(0f), rainbow(90f), rainbow(180f), rainbow(270f)), null, Shader.TileMode.CLAMP,
+            )
+            c.drawRoundRect(panelRect, rad, rad, bpPaint)
+            bpPaint.shader = null
+            bpPaint.style = Paint.Style.FILL
+
+            // заголовок со свечением
+            val title = "Тилкайо  Bypass"
+            text(c, title, px + pw / 2f, py + 34f * d, 23.5f * d, withA(rainbow(0f), 0x40), shadow = false, maxW = pw - 30f * d)
+            text(c, title, px + pw / 2f, py + 34f * d, 22f * d, rainbow(0f), shadow = false, maxW = pw - 34f * d)
+
+            // вкладки
+            val tabTop = py + 50f * d
+            val tabH = 34f * d
+            val n = bpTabs.size
+            val tabW = (pw - 24f * d) / n
+            bpRect2.set(px + 12f * d, tabTop - 2f * d, px + pw - 12f * d, tabTop + tabH + 2f * d)
+            bpPaint.color = 0x22FFFFFF
+            c.drawRoundRect(bpRect2, (tabH + 4f * d) / 2f, (tabH + 4f * d) / 2f, bpPaint)
+            bpRect.set(
+                px + 12f * d + bpTabT * tabW + 2f * d, tabTop,
+                px + 12f * d + (bpTabT + 1f) * tabW - 2f * d, tabTop + tabH,
+            )
+            bpPaint.shader = LinearGradient(bpRect.left, 0f, bpRect.right, 0f, rainbow(0f), rainbow(90f), Shader.TileMode.CLAMP)
+            c.drawRoundRect(bpRect, tabH / 2f, tabH / 2f, bpPaint)
+            bpPaint.shader = null
+            for ((qi, nm) in bpTabs.withIndex()) {
+                val sel = qi == bpPage
+                text(
+                    c, nm, px + 12f * d + (qi + 0.5f) * tabW, tabTop + tabH * 0.66f, tabH * 0.38f,
+                    if (sel) 0xFF14060C.toInt() else 0xD0FFFFFF.toInt(), shadow = false, maxW = tabW - 6f * d,
+                )
             }
 
-            text(c, if (bpPage == 0) "Тилкайо  Bypass" else "Настройки", px + pw / 2f, py + 38f * d, 24f * d, rainbow(0f), shadow = false, maxW = pw - 30f * d)
-
+            val rate = min(1f, dt * (if (fast) 100f else 14f))
             for ((i, row) in rows.withIndex()) {
                 val top = py + headH + i * rowH
                 bpRect.set(px + 12f * d, top + 2f * d, px + pw - 12f * d, top + rowH - 2f * d)
+                if (row.kind == 0) row.t += ((if (row.get()) 1f else 0f) - row.t) * rate
                 bpPaint.style = Paint.Style.FILL
-                bpPaint.color = if (row.kind == 1) 0x14FFFFFF else 0x26FFFFFF
-                c.drawRoundRect(bpRect, 10f * d, 10f * d, bpPaint)
+                bpPaint.color = if (row.kind == 1) 0x18FFFFFF else 0x24FFFFFF
+                c.drawRoundRect(bpRect, 13f * d, 13f * d, bpPaint)
+                if (row.kind == 0 && row.t > 0.02f) {
+                    bpPaint.color = withA(rainbow(i * 40f), (row.t * 38).toInt())
+                    c.drawRoundRect(bpRect, 13f * d, 13f * d, bpPaint)
+                    bpPaint.color = withA(rainbow(i * 40f), (row.t * 255).toInt())
+                    bpRect2.set(bpRect.left + 1f * d, bpRect.top + 7f * d, bpRect.left + 4f * d, bpRect.bottom - 7f * d)
+                    c.drawRoundRect(bpRect2, 2f * d, 2f * d, bpPaint)
+                }
                 val ts = min(15f * d, rowH * 0.4f)
                 val labW = if (row.kind >= 2) pw * 0.30f else pw - 100f * d
-                text(c, row.label, bpRect.left + 12f * d, bpRect.centerY() + ts * 0.35f, ts, align = Paint.Align.LEFT, shadow = false, maxW = labW)
+                text(c, row.label, bpRect.left + 14f * d, bpRect.centerY() + ts * 0.35f, ts, align = Paint.Align.LEFT, shadow = false, maxW = labW)
                 val cy = bpRect.centerY()
                 when (row.kind) {
                     0 -> {
-                        val on = row.get()
-                        val tw = 44f * d
-                        val th = min(24f * d, rowH * 0.6f)
+                        val sw = 46f * d
+                        val th = min(25f * d, rowH * 0.6f)
                         val tr = bpRect.right - 12f * d
-                        val tl = tr - tw
+                        val tl = tr - sw
+                        if (row.t > 0.02f) {
+                            bpRect2.set(tl - 3f * d, cy - th / 2f - 3f * d, tr + 3f * d, cy + th / 2f + 3f * d)
+                            bpPaint.color = withA(rainbow(i * 40f), (row.t * 50).toInt())
+                            c.drawRoundRect(bpRect2, th / 2f + 3f * d, th / 2f + 3f * d, bpPaint)
+                        }
                         bpRect2.set(tl, cy - th / 2f, tr, cy + th / 2f)
-                        bpPaint.color = if (on) rainbow(i * 40f) else 0xFF555566.toInt()
+                        bpPaint.color = lerpColor(0xFF4A4660.toInt(), rainbow(i * 40f), row.t)
                         c.drawRoundRect(bpRect2, th / 2f, th / 2f, bpPaint)
                         bpPaint.color = 0xFFFFFFFF.toInt()
-                        val kx = if (on) tr - th / 2f else tl + th / 2f
+                        val kx = tl + th / 2f + (sw - th) * row.t
                         c.drawCircle(kx, cy, th / 2f - 3f * d, bpPaint)
                     }
-                    1 -> text(c, "▶", bpRect.right - 20f * d, cy + ts * 0.35f, ts, 0xFFAAAAAA.toInt(), shadow = false)
+                    1 -> {
+                        bpPaint.color = withA(rainbow(i * 40f), 0x30)
+                        c.drawCircle(bpRect.right - 20f * d, cy, 11f * d, bpPaint)
+                        text(c, "›", bpRect.right - 20f * d, cy + ts * 0.42f, ts * 1.3f, rainbow(i * 40f), shadow = false)
+                    }
                     2 -> {
                         val v = row.getF().coerceIn(0f, 1f)
                         val th = 6f * d
                         bpRect2.set(bpTrackL, cy - th / 2f, bpTrackR, cy + th / 2f)
-                        bpPaint.color = 0x55FFFFFF
+                        bpPaint.color = 0x44FFFFFF
                         c.drawRoundRect(bpRect2, th / 2f, th / 2f, bpPaint)
                         val kx = bpTrackL + (bpTrackR - bpTrackL) * v
                         bpRect2.set(bpTrackL, cy - th / 2f, kx, cy + th / 2f)
-                        bpPaint.color = rainbow(i * 40f)
+                        bpPaint.shader = LinearGradient(bpTrackL, 0f, bpTrackR, 0f, rainbow(i * 40f), rainbow(i * 40f + 90f), Shader.TileMode.CLAMP)
                         c.drawRoundRect(bpRect2, th / 2f, th / 2f, bpPaint)
+                        bpPaint.shader = null
+                        bpPaint.color = withA(rainbow(i * 40f), 0x50)
+                        c.drawCircle(kx, cy, 13f * d, bpPaint)
                         bpPaint.color = 0xFFFFFFFF.toInt()
                         c.drawCircle(kx, cy, 8f * d, bpPaint)
                         text(c, row.valueText(), bpRect.right - 8f * d, cy + ts * 0.3f, ts * 0.85f, align = Paint.Align.RIGHT, shadow = false, maxW = 46f * d)
                     }
                     3 -> {
-                        val n = row.opts.size
-                        val cwid = (bpSegR - bpSegL) / n
+                        val cnt = row.opts.size
+                        val cwid = (bpSegR - bpSegL) / cnt
                         val sel = row.getI()
-                        for (q in 0 until n) {
+                        for (q in 0 until cnt) {
                             bpRect2.set(bpSegL + q * cwid + 2f * d, bpRect.top + 4f * d, bpSegL + (q + 1) * cwid - 2f * d, bpRect.bottom - 4f * d)
                             bpPaint.color = if (q == sel) rainbow(q * 60f) else 0x33FFFFFF
-                            c.drawRoundRect(bpRect2, 8f * d, 8f * d, bpPaint)
+                            c.drawRoundRect(bpRect2, 9f * d, 9f * d, bpPaint)
                             text(c, row.opts[q], bpRect2.centerX(), bpRect2.centerY() + ts * 0.3f, ts * 0.75f,
                                 if (q == sel) 0xFF101018.toInt() else 0xFFFFFFFF.toInt(), shadow = false, maxW = cwid - 6f * d)
                         }
@@ -894,8 +1062,24 @@ class GameView(context: Context) : View(context) {
             if (layered) c.restore()
         }
 
-        bpFrame(c, fabRect, 14f * d, 3f * d, 0xF2121218.toInt())
-        text(c, "TB", fabRect.centerX(), fabRect.centerY() + sz * 0.16f, sz * 0.46f, rainbow(0f), shadow = false)
+        // кнопка TB: светящийся шар с пульсацией
+        val fcx = fabRect.centerX()
+        val fcy = fabRect.centerY()
+        val pul = 1f + 0.08f * sin(anim * 3f)
+        bpPaint.style = Paint.Style.FILL
+        bpPaint.color = withA(rainbow(0f), 0x22)
+        c.drawCircle(fcx, fcy, sz * 0.8f * pul, bpPaint)
+        bpPaint.color = withA(rainbow(60f), 0x33)
+        c.drawCircle(fcx, fcy, sz * 0.64f * pul, bpPaint)
+        bpPaint.shader = LinearGradient(fabRect.left, fabRect.top, fabRect.right, fabRect.bottom, 0xFF2A0D1C.toInt(), 0xFF0E0409.toInt(), Shader.TileMode.CLAMP)
+        c.drawRoundRect(fabRect, sz * 0.34f, sz * 0.34f, bpPaint)
+        bpPaint.shader = LinearGradient(fabRect.left, fabRect.top, fabRect.right, fabRect.bottom, rainbow(0f), rainbow(120f), Shader.TileMode.CLAMP)
+        bpPaint.style = Paint.Style.STROKE
+        bpPaint.strokeWidth = 2.5f * d
+        c.drawRoundRect(fabRect, sz * 0.34f, sz * 0.34f, bpPaint)
+        bpPaint.shader = null
+        bpPaint.style = Paint.Style.FILL
+        text(c, "TB", fcx, fcy + sz * 0.16f, sz * 0.46f, rainbow(0f), shadow = false)
     }
 
     /** Возвращает true, если касание забрала кнопка TB или открытая панель. */
@@ -921,7 +1105,16 @@ class GameView(context: Context) : View(context) {
                 if (x >= bpPx && x <= bpPx + bpPw && y >= bpPy && y <= bpPy + bpPh) {
                     val rows = bpCur()
                     val i = ((y - bpPy - bpHeadH) / bpRowH).toInt()
-                    if (y >= bpPy + bpHeadH && i in rows.indices) {
+                    val tabTop = bpPy + 50f * resources.displayMetrics.density
+                    if (y >= tabTop && y < bpPy + bpHeadH) {
+                        val nTabs = bpTabs.size
+                        val q = (((x - bpPx) / bpPw) * nTabs).toInt().coerceIn(0, nTabs - 1)
+                        if (q != bpPage) {
+                            performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            sfx.play(Sfx.S.CLICK)
+                            bpPage = q
+                        }
+                    } else if (y >= bpPy + bpHeadH && i in rows.indices) {
                         val row = rows[i]
                         when (row.kind) {
                             2 -> {
@@ -1016,7 +1209,7 @@ class GameView(context: Context) : View(context) {
             Scene.PASS -> drawPass(c)
             Scene.PLAY, Scene.DEAD -> {
                 if (scene == Scene.PLAY && !paused) {
-                    var rem = dt
+                    var rem = dt * bpSlow
                     while (rem > 0f) {
                         val s = min(rem, 1f / 120f)
                         stepPlay(s)
@@ -1154,8 +1347,9 @@ class GameView(context: Context) : View(context) {
     private fun startRun() {
         mode = Mode.NORMAL
         resetCommon()
+        fxStars.clear(); fxRings.clear(); trail.clear()
         val mods = save.mods
-        sim.reset(runLevel, save.coinMultiplier() * Mods.multiplier(mods), viewH)
+        sim.reset(runLevel, save.coinMultiplier() * Mods.multiplier(mods) * bpCoinMul, viewH)
         sim.lavaMul = if (Mods.has(mods, Mods.LAVA)) 1.6f else 1f
         gen.reset()
         gen.sparse = Mods.has(mods, Mods.SPARSE)
@@ -1203,7 +1397,11 @@ class GameView(context: Context) : View(context) {
         bossHint = max(0f, bossHint - dt)
         for (b in sim.bumpers) b.pop = max(0f, b.pop - dt)
 
+        if (bpGod) sim.shield = max(sim.shield, 1.5f)
+        if (bpInfAir && sim.jumpsLeft < MAX_AIR) sim.jumpsLeft = MAX_AIR
+        sim.lavaOn = !bpNoLava
         sim.step(dt)
+        fxPlay(dt)
         if (mode == Mode.NORMAL) gen.fill(sim.camY - 800f)
         handleEvents()
         sim.cleanup()
@@ -1244,10 +1442,16 @@ class GameView(context: Context) : View(context) {
                     performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                     sfx.play(Sfx.S.JUMP)
                     dust(ev.x, ev.y, 6, 0xFFFFFFFF.toInt())
+                    if (bpJumpMul > 1.01f) sim.pvy *= bpJumpMul
+                    fxRing(ev.x, ev.y + sim.r * 0.4f, 46f, fxColor(0f))
+                    starBurst(ev.x, ev.y, 8, 150f, 0f)
                 }
                 Ev.AIR -> {
                     sfx.play(Sfx.S.AIR, 1f + (MAX_AIR - sim.jumpsLeft) * 0.12f)
                     ring(ev.x, ev.y, 0xFF9BE7FF.toInt())
+                    if (bpJumpMul > 1.01f) sim.pvy *= bpJumpMul
+                    fxRing(ev.x, ev.y, 62f, fxColor(140f), 0.5f)
+                    starBurst(ev.x, ev.y, 10, 180f, 140f)
                 }
                 Ev.SLIP -> {
                     sfx.play(Sfx.S.SLIP)
@@ -1256,10 +1460,13 @@ class GameView(context: Context) : View(context) {
                 Ev.LAND -> {
                     sfx.play(Sfx.S.LAND, 0.9f + rnd.nextFloat() * 0.2f, 0.7f)
                     dust(ev.x - sim.side * sim.r * 0.3f, ev.y, 8, 0xFFE0D6FF.toInt())
+                    fxRing(ev.x, ev.y, 40f, fxColor(220f), 0.3f)
+                    starBurst(ev.x, ev.y, 6, 110f, 220f)
                 }
                 Ev.COIN -> {
                     combo++
                     comboT = 0.7f
+                    starBurst(ev.x, ev.y, 4, 90f, 40f)
                     sfx.play(Sfx.S.COIN, min(1.9f, 1f + combo * 0.06f))
                     sparkle(ev.x, ev.y, 0xFFFFD54F.toInt())
                     pops.add(Pop(ev.x, ev.y - 8f, "+" + fmt(sim.coinMul), 0xFFFFE082.toInt(), 13f))
@@ -1277,6 +1484,8 @@ class GameView(context: Context) : View(context) {
                     sfx.play(Sfx.S.SMASH)
                     shake = max(shake, 0.15f)
                     sparkle(ev.x, ev.y, 0xFFCFD8DC.toInt())
+                    fxRing(ev.x, ev.y, 54f, fxColor(300f), 0.6f)
+                    starBurst(ev.x, ev.y, 9, 160f, 300f)
                     pops.add(Pop(ev.x, ev.y - 10f, "+" + fmt(sim.coinMul * 3), 0xFFFFE082.toInt(), 16f))
                 }
                 Ev.CANNON_IN -> sfx.play(Sfx.S.CAN_IN)
@@ -1296,6 +1505,8 @@ class GameView(context: Context) : View(context) {
                     (ev.ref as Bumper).pop = 0.3f
                     sfx.play(Sfx.S.BUMP, 0.9f + rnd.nextFloat() * 0.3f)
                     ring(ev.x, ev.y, 0xFFFF8AD8.toInt())
+                    fxRing(ev.x, ev.y, 50f, fxColor(320f), 0.8f)
+                    starBurst(ev.x, ev.y, 7, 140f, 320f)
                 }
                 Ev.BOSS_START -> {
                     rushT0 = sim.time
@@ -1399,6 +1610,8 @@ class GameView(context: Context) : View(context) {
         if (score > save.best) save.best = score
         passGain(10 + max(0, score) / 3)
         save.save()
+        starBurst(sim.px, sim.py, 40, 320f, 0f)
+        fxRing(sim.px, sim.py, 90f, fxColor(0f), 0.7f, 0.8f)
         sfx.play(Sfx.S.DEATH)
         performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         for (i in 0 until 28) {
@@ -1431,7 +1644,207 @@ class GameView(context: Context) : View(context) {
         }
     }
 
+    // ---------- визуальные эффекты: звёзды, кольца, шлейф, аура ----------
+    private val fxStars = ArrayList<Star>()
+    private val fxRings = ArrayList<FxRing>()
+    private val trail = ArrayList<TrailPt>()
+    private val fxPath = Path()
+    private val fxHsv = FloatArray(3)
+    private var trailAcc = 0f
+
+    private fun fxK(): Float = if (bpFxOn) bpFxPower else 0f
+
+    /** Яркий цвет эффектов: плавно гуляет по радуге. */
+    private fun fxColor(off: Float, a: Int = 255): Int {
+        fxHsv[0] = ((anim * 70f + off) % 360f + 360f) % 360f
+        fxHsv[1] = 0.62f
+        fxHsv[2] = 1f
+        return android.graphics.Color.HSVToColor(a, fxHsv)
+    }
+
+    private fun starBurst(x: Float, y: Float, n: Int, speed: Float, hueOff: Float) {
+        val kf = fxK()
+        if (!bpFxStars || kf <= 0f) return
+        val cnt = (n * kf).toInt()
+        for (i in 0 until cnt) {
+            val a = rnd.nextFloat() * 2f * PI.toFloat()
+            val sp = speed * (0.35f + rnd.nextFloat() * 0.9f)
+            val l = 0.7f + rnd.nextFloat() * 0.6f
+            fxStars.add(
+                Star(
+                    x, y, cos(a) * sp, sin(a) * sp - 30f, l, l,
+                    fxColor(hueOff + rnd.nextFloat() * 120f), 3f + rnd.nextFloat() * 5f,
+                    rnd.nextFloat() * 360f, (rnd.nextFloat() - 0.5f) * 360f,
+                ),
+            )
+        }
+        if (fxStars.size > 500) fxStars.subList(0, fxStars.size - 500).clear()
+    }
+
+    private fun fxRing(x: Float, y: Float, maxR: Float, color: Int, flat: Float = 0.35f, age: Float = 0.55f) {
+        val kf = fxK()
+        if (!bpFxRings || kf <= 0f) return
+        fxRings.add(FxRing(x, y, age, color, maxR * (0.7f + 0.3f * kf), flat))
+        if (fxRings.size > 40) fxRings.removeAt(0)
+    }
+
+    private fun fxStep(dt: Float) {
+        for (st in fxStars) {
+            st.life -= dt
+            st.x += st.vx * dt
+            st.y += st.vy * dt
+            st.vy += 120f * dt
+            st.vx *= max(0f, 1f - 1.2f * dt)
+            st.rot += st.spin * dt
+        }
+        fxStars.removeAll { it.life <= 0f }
+        for (rg in fxRings) rg.age += dt
+        fxRings.removeAll { it.age >= it.maxAge }
+        for (t in trail) t.age += dt
+        trail.removeAll { it.age > 0.45f }
+    }
+
+    /** Каждый шаг симуляции: точки шлейфа и звёздочки вокруг кота. */
+    private fun fxPlay(dt: Float) {
+        val kf = fxK()
+        if (kf <= 0f) return
+        if (bpFxTrail) {
+            trailAcc += dt
+            if (trailAcc >= 0.012f) {
+                trailAcc = 0f
+                if (!sim.onWall && sim.inCannon == null && !sim.dead) trail.add(TrailPt(sim.px, sim.py))
+                if (trail.size > 70) trail.removeAt(0)
+            }
+        }
+        if (bpFxStars && !sim.dead && sim.inCannon == null && rnd.nextFloat() < dt * 14f * kf) {
+            val a = rnd.nextFloat() * 2f * PI.toFloat()
+            val big = if (bpBig) bpBigSize else 1f
+            val rr = sim.r * big * (0.6f + rnd.nextFloat() * 0.9f)
+            val l = 0.8f + rnd.nextFloat() * 0.6f
+            fxStars.add(
+                Star(
+                    sim.px + cos(a) * rr, sim.py + sin(a) * rr,
+                    (rnd.nextFloat() - 0.5f) * 30f, -20f - rnd.nextFloat() * 40f, l, l,
+                    fxColor(rnd.nextFloat() * 140f), 2.5f + rnd.nextFloat() * 3.5f,
+                    rnd.nextFloat() * 360f, (rnd.nextFloat() - 0.5f) * 240f,
+                ),
+            )
+        }
+    }
+
+    /** Кольца, шлейф и аура: рисуются под котом. */
+    private fun drawFxBehind(c: Canvas) {
+        val kf = fxK()
+        if (kf <= 0f) return
+        if (bpFxRings) {
+            for (rg in fxRings) {
+                val t = (rg.age / rg.maxAge).coerceIn(0f, 1f)
+                val e = 1f - (1f - t) * (1f - t)
+                val rr = rg.maxR * e
+                rect.set(rg.x - rr, rg.y - rr * rg.flat, rg.x + rr, rg.y + rr * rg.flat)
+                p.style = Paint.Style.STROKE
+                p.strokeWidth = 5f * (1f - t) + 1f
+                p.color = withA(rg.color, ((1f - t) * 70f).toInt())
+                c.drawOval(rect, p)
+                p.strokeWidth = 2f * (1f - t) + 0.8f
+                p.color = withA(rg.color, ((1f - t) * 255f).toInt())
+                c.drawOval(rect, p)
+            }
+            p.style = Paint.Style.FILL
+        }
+        if (bpFxTrail && trail.size > 1) {
+            p.style = Paint.Style.STROKE
+            p.strokeCap = Paint.Cap.ROUND
+            for (i in 1 until trail.size) {
+                val a = trail[i - 1]
+                val b = trail[i]
+                if (hypot(b.x - a.x, b.y - a.y) > 80f) continue
+                val f = (1f - b.age / 0.45f).coerceIn(0f, 1f)
+                val col = fxColor(i * 4f)
+                p.strokeWidth = (sim.r * 1.1f * f + 1f) * (0.7f + 0.3f * kf)
+                p.color = withA(col, (f * 70f).toInt())
+                c.drawLine(a.x, a.y, b.x, b.y, p)
+                p.strokeWidth = sim.r * 0.45f * f + 0.6f
+                p.color = withA(col, (f * 230f).toInt())
+                c.drawLine(a.x, a.y, b.x, b.y, p)
+            }
+            p.strokeCap = Paint.Cap.BUTT
+            p.style = Paint.Style.FILL
+        }
+        if (bpFxAura && scene == Scene.PLAY && sim.inCannon == null && !sim.dead) {
+            val pulse = 1f + 0.12f * sin(anim * 4f)
+            val big = if (bpBig) bpBigSize else 1f
+            val rr = sim.r * 2.6f * pulse * (0.8f + 0.2f * kf) * big
+            p.style = Paint.Style.FILL
+            p.shader = RadialGradient(
+                sim.px, sim.py, rr,
+                intArrayOf(fxColor(0f, 0x66), fxColor(80f, 0x22), 0x00000000),
+                floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP,
+            )
+            c.drawCircle(sim.px, sim.py, rr, p)
+            p.shader = null
+        }
+    }
+
+    /** Звёзды с мягким свечением: рисуются поверх кота. */
+    private fun drawFxFront(c: Canvas) {
+        if (!bpFxOn || !bpFxStars || fxStars.isEmpty()) return
+        val kf = fxK()
+        p.style = Paint.Style.FILL
+        for (st in fxStars) {
+            val a = (st.life / st.maxLife).coerceIn(0f, 1f)
+            val sz = st.size * (0.4f + 0.6f * a) * (0.8f + 0.2f * kf)
+            p.color = withA(st.color, (a * 60f).toInt())
+            c.drawCircle(st.x, st.y, sz * 1.8f, p)
+            c.save()
+            c.translate(st.x, st.y)
+            c.rotate(st.rot)
+            fxPath.reset()
+            val ir = sz * 0.28f
+            fxPath.moveTo(0f, -sz)
+            fxPath.lineTo(ir, -ir)
+            fxPath.lineTo(sz, 0f)
+            fxPath.lineTo(ir, ir)
+            fxPath.lineTo(0f, sz)
+            fxPath.lineTo(-ir, ir)
+            fxPath.lineTo(-sz, 0f)
+            fxPath.lineTo(-ir, -ir)
+            fxPath.close()
+            p.color = withA(st.color, (a * 255f).toInt())
+            c.drawPath(fxPath, p)
+            p.color = withA(0xFFFFFFFF.toInt(), (a * 200f).toInt())
+            c.drawCircle(0f, 0f, sz * 0.18f, p)
+            c.restore()
+        }
+    }
+
+    /** Падающие звёзды на фоне (в мировых координатах 360 x viewH). */
+    private fun fxComets(c: Canvas) {
+        p.style = Paint.Style.STROKE
+        p.strokeCap = Paint.Cap.ROUND
+        for (i in 0 until 3) {
+            val per = 5f + i * 1.7f
+            val t = ((anim + i * 2.3f) % per) / per
+            if (t > 0.35f) continue
+            val f = t / 0.35f
+            val sx = W * (0.15f + 0.04f * ((i * 37) % 10)) + f * 160f
+            val sy = viewH * (0.08f + 0.2f * i) + f * 110f
+            val a = ((1f - f) * 255f).toInt()
+            val ex = sx - 70f * (1f - f * 0.3f)
+            val ey = sy - 49f * (1f - f * 0.3f)
+            p.strokeWidth = 3f
+            p.color = withA(fxColor(i * 80f), a / 3)
+            c.drawLine(sx, sy, ex, ey, p)
+            p.strokeWidth = 1.4f
+            p.color = withA(0xFFFFFFFF.toInt(), a)
+            c.drawLine(sx, sy, ex, ey, p)
+        }
+        p.strokeCap = Paint.Cap.BUTT
+        p.style = Paint.Style.FILL
+    }
+
     private fun stepFx(dt: Float) {
+        fxStep(dt)
         for (q in particles) {
             q.life -= dt
             q.x += q.vx * dt
@@ -1599,6 +2012,7 @@ class GameView(context: Context) : View(context) {
             p.color = rainbow(i * 18f, (0x50 + 0x90 * tw).toInt())
             c.drawCircle(pX[i], pY[i], pS[i] * 1.1f, p)
         }
+        if (bpFxOn && bpFxAmbient) fxComets(c)
         if (bpHalloween) drawHalloweenDecor(c)
         c.restore()
         // виньетка
@@ -1675,6 +2089,26 @@ class GameView(context: Context) : View(context) {
         p.color = 0x22FFFFFF
         c.drawRoundRect(x + 2f, y + 2f, x + w - 2f, y + h - 2f, rad - 2f, rad - 2f, p)
         p.style = Paint.Style.FILL
+        if (enabled) {
+            // глянец и бегущий блик
+            bpClip.reset()
+            bpClip.addRoundRect(x + 1f, y + 1f, x + w - 1f, y + h - 1f, rad, rad, Path.Direction.CW)
+            c.save()
+            c.clipPath(bpClip)
+            p.color = 0x12FFFFFF
+            c.drawRect(x, y, x + w, y + h * 0.45f, p)
+            val sh = ((anim * 0.45f + x * 0.004f + y * 0.002f) % 2.2f) - 0.5f
+            if (sh > -0.3f && sh < 1.3f) {
+                val sx0 = x + w * sh
+                p.shader = LinearGradient(
+                    sx0 - h, 0f, sx0 + h, 0f,
+                    intArrayOf(0x00FFFFFF, withA(accent, 0x30), 0x00FFFFFF), null, Shader.TileMode.CLAMP,
+                )
+                c.drawRect(x, y, x + w, y + h, p)
+                p.shader = null
+            }
+            c.restore()
+        }
         if (rippleAge < 0.5f && here) {
             val t = rippleAge / 0.5f
             val ez = 1f - (1f - t) * (1f - t)
@@ -1828,7 +2262,7 @@ class GameView(context: Context) : View(context) {
         c.save()
         c.translate(cx, cy)
         c.rotate(rot + (if (bpSpin) anim * 540f else 0f))
-        val bigK = if (bpBig) 1.6f else 1f
+        val bigK = if (bpBig) bpBigSize else 1f
         c.scale(sx * faceDir * bigK, sy * bigK)
         rect.set(-w / 2, -h / 2, w / 2, h / 2)
         if (hidden) {
@@ -2148,6 +2582,7 @@ class GameView(context: Context) : View(context) {
 
         drawBoss(c, top, bot)
 
+        drawFxBehind(c)
         // тилкайо
         if (scene == Scene.PLAY && inCannon == null) {
             val rot = if (onWall) side * 10f else (face * pvy / 20f).coerceIn(-25f, 25f)
@@ -2210,6 +2645,7 @@ class GameView(context: Context) : View(context) {
             }
         }
 
+        drawFxFront(c)
         drawParticles(c)
         for (q in pops) {
             val a = q.life.coerceIn(0f, 1f)
