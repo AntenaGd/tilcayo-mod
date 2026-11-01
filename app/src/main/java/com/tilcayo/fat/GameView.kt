@@ -387,7 +387,7 @@ class GameView(context: Context) : View(context) {
             BpRow("∞  Бесконечные монеты", true, { bpInfCoins }) { bpInfCoins = !bpInfCoins },
             BpRow("∞  Бесконечные боксы", true, { bpInfBoxes }) { bpInfBoxes = !bpInfBoxes },
             BpRow("Радужный мир", true, { bpRainbowWorld }) { bpRainbowWorld = !bpRainbowWorld },
-            BpRow("Тёмная радужная тема", true, { RAINBOW_DARK }) { RAINBOW_DARK = !RAINBOW_DARK },
+            BpRow("Радужная тема (вместо неона)", true, { RAINBOW_DARK }) { RAINBOW_DARK = !RAINBOW_DARK },
             BpRow("Кот-крутилка", true, { bpSpin }) { bpSpin = !bpSpin },
             BpRow("Кот-гигант", true, { bpBig }) { bpBig = !bpBig },
             BpRow("Хеллоуин-декор", true, { bpHalloween }) { bpHalloween = !bpHalloween },
@@ -516,7 +516,7 @@ class GameView(context: Context) : View(context) {
     // Хеллоуин: декор, пасс
     // =====================================================================
 
-    private var bpHalloween = true
+    private var bpHalloween = false
 
     /** Луна, летучие мыши, привидения, паутина и тыквы поверх фона (в мировых координатах). */
     private fun drawHalloweenDecor(c: Canvas) {
@@ -582,7 +582,7 @@ class GameView(context: Context) : View(context) {
         c.scale(ui, ui)
 
         btn(c, "◀", 10f, 14f, 52f, 44f, k(0xFF5C6BC0)) { goMenu() }
-        text(c, "🎃 ХЕЛЛОУИН-ПАСС", 200f, 46f, 26f, k(0xFFFFB74D), maxW = 270f)
+        text(c, "🎃 ХЕЛЛОУИН-ПАСС", 200f, 46f, 26f, rainbow(0f), maxW = 270f)
 
         val lvl = HPass.level(save)
         panel(c, 14f, 68f, 332f, 46f, 0x66000000)
@@ -609,7 +609,7 @@ class GameView(context: Context) : View(context) {
             val claimed = HPass.isClaimed(save, i)
             val bg = when {
                 claimed -> 0x55007A33
-                reached -> 0xCCFF8F00.toInt()
+                reached -> 0xCC7A1030.toInt()
                 else -> 0x44000000
             }
             panel(c, x, y, cw, ch, bg)
@@ -990,6 +990,8 @@ class GameView(context: Context) : View(context) {
         anim += dt * (if (bpAnimOn) bpAnimSpeed else 0f)
         sceneTime += dt
         rippleAge += dt
+        frameDt = dt
+        frameNo++
         toastT = max(0f, toastT - dt)
         buttons.clear()
         if (bpInfCoins && save.coins < 900_000_000L) save.coins = 999_999_999L
@@ -1448,13 +1450,89 @@ class GameView(context: Context) : View(context) {
     // =====================================================================
 
     /** Тёмная + радужная тема. Поставь false, чтобы вернуть старые цвета. */
-    private var RAINBOW_DARK = true
+    private var RAINBOW_DARK = false
     private val hsv = FloatArray(3)
+    /** Акцентный цвет интерфейса: неон красный ↔ розовый (или настоящая радуга, если включена радужная тема). */
     private fun rainbow(offset: Float = 0f, alpha: Int = 255): Int {
-        hsv[0] = ((anim * 40f + offset) % 360f + 360f) % 360f
-        hsv[1] = 0.85f
-        hsv[2] = 1f
+        if (RAINBOW_DARK) {
+            hsv[0] = ((anim * 40f + offset) % 360f + 360f) % 360f
+            hsv[1] = 0.85f
+            hsv[2] = 1f
+        } else {
+            val t = 0.5f + 0.5f * sin(anim * 1.4f + offset * 0.025f)
+            hsv[0] = 355f - 27f * t
+            hsv[1] = 0.80f - 0.22f * t
+            hsv[2] = 1f
+        }
         return android.graphics.Color.HSVToColor(alpha, hsv)
+    }
+
+    private fun withA(color: Int, a: Int) = (color and 0x00FFFFFF) or (a.coerceIn(0, 255) shl 24)
+
+    // ----- частицы и плавные линии на фоне -----
+    private val partN = 36
+    private val pX = FloatArray(partN)
+    private val pY = FloatArray(partN)
+    private val pVx = FloatArray(partN)
+    private val pVy = FloatArray(partN)
+    private val pS = FloatArray(partN)
+    private val pPh = FloatArray(partN)
+    private var partInit = false
+    private var partFrame = -1
+    private var frameNo = 0
+    private var frameDt = 0.016f
+    private val bgPath = Path()
+
+    private fun stepParticles() {
+        if (!partInit) {
+            for (i in 0 until partN) {
+                pX[i] = rnd.nextFloat() * W
+                pY[i] = rnd.nextFloat() * viewH
+                pVx[i] = (rnd.nextFloat() - 0.5f) * 8f
+                pVy[i] = -(4f + rnd.nextFloat() * 14f)
+                pS[i] = 0.7f + rnd.nextFloat() * 1.8f
+                pPh[i] = rnd.nextFloat() * 6.28f
+            }
+            partInit = true
+        }
+        if (partFrame == frameNo) return
+        partFrame = frameNo
+        val dt = min(frameDt, 0.05f) * (if (bpAnimOn) bpAnimSpeed else 0f)
+        for (i in 0 until partN) {
+            pX[i] += pVx[i] * dt + sin(anim * 0.8f + pPh[i]) * 4f * dt
+            pY[i] += pVy[i] * dt
+            if (pY[i] < -6f) {
+                pY[i] = viewH + 6f
+                pX[i] = rnd.nextFloat() * W
+            }
+            if (pX[i] < -6f) pX[i] = W + 6f else if (pX[i] > W + 6f) pX[i] = -6f
+        }
+    }
+
+    /** Металлический заголовок с неоновым свечением и объёмом. */
+    private fun neonTitle(c: Canvas, s: String, x: Float, y: Float, size: Float, maxW: Float = 330f) {
+        tp.textAlign = Paint.Align.CENTER
+        tp.style = Paint.Style.FILL
+        tp.textSize = size
+        val wdt = tp.measureText(s)
+        val sz = if (wdt > maxW) size * maxW / wdt else size
+        tp.textSize = sz
+        val glow = 0.6f + 0.4f * sin(anim * 2f)
+        tp.shader = null
+        tp.color = 0xFF3A0612.toInt()
+        for (i in 4 downTo 1) c.drawText(s, x, y + i * sz * 0.022f, tp)
+        tp.color = rainbow(0f)
+        tp.setShadowLayer(sz * 0.45f * glow + 6f, 0f, 0f, rainbow(0f, 0xCC))
+        c.drawText(s, x, y, tp)
+        tp.clearShadowLayer()
+        tp.color = 0xFFFFFFFF.toInt()
+        tp.shader = LinearGradient(
+            0f, y - sz * 0.8f, 0f, y + sz * 0.1f,
+            intArrayOf(0xFFFFFFFF.toInt(), 0xFFE9E9F2.toInt(), 0xFFFF9AB8.toInt(), 0xFFFF2D6A.toInt()),
+            floatArrayOf(0f, 0.38f, 0.62f, 1f), Shader.TileMode.CLAMP,
+        )
+        c.drawText(s, x, y, tp)
+        tp.shader = null
     }
     private var debugTaps = 0
     private var lastDebugTap = 0L
@@ -1473,32 +1551,60 @@ class GameView(context: Context) : View(context) {
     }
 
     private fun drawBackground(c: Canvas, top: Int, bottom: Int, scroll: Float, withStars: Boolean = true) {
-        val topCol = if (RAINBOW_DARK) k(0xFF020106) else top
-        val botCol = if (RAINBOW_DARK) lerpColor(k(0xFF060310), rainbow(0f), 0.10f) else bottom
+        val w = width.toFloat()
+        val h = height.toFloat()
         p.style = Paint.Style.FILL
-        p.color = 0xFF000000.toInt() // альфа краски домножается на шейдер, поэтому она обязана быть непрозрачной
-        p.shader = LinearGradient(0f, 0f, 0f, height.toFloat(), topCol, botCol, Shader.TileMode.CLAMP)
-        c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), p)
-        if (RAINBOW_DARK) {
-            val cols = IntArray(7) { rainbow(it * 50f, 200) }
-            p.shader = LinearGradient(0f, 0f, width.toFloat(), 0f, cols, null, Shader.TileMode.CLAMP)
-            val bh = height * 0.008f
-            c.drawRect(0f, 0f, width.toFloat(), bh, p)
-            c.drawRect(0f, height - bh, width.toFloat(), height.toFloat(), p)
-        }
+        p.color = 0xFF000000.toInt()
+        p.shader = LinearGradient(0f, 0f, 0f, h, 0xFF040106.toInt(), 0xFF150409.toInt(), Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, w, h, p)
+        val pulse = 0.88f + 0.12f * sin(anim * 1.3f)
+        p.shader = android.graphics.RadialGradient(w * 0.12f, h * 0.16f, w * 0.95f * pulse, rainbow(0f, 0x46), 0x00000000, Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, w, h, p)
+        p.shader = android.graphics.RadialGradient(w * 0.92f, h * 0.86f, w * 1.05f, rainbow(70f, 0x3A), 0x00000000, Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, w, h, p)
+        // тонкие неоновые линии сверху и снизу
+        p.shader = LinearGradient(
+            0f, 0f, w, 0f,
+            intArrayOf(0x00000000, rainbow(0f, 0xCC), rainbow(120f, 0xCC), 0x00000000), null, Shader.TileMode.CLAMP,
+        )
+        val bh = height * 0.004f
+        c.drawRect(0f, 0f, w, bh, p)
+        c.drawRect(0f, h - bh, w, h, p)
         p.shader = null
         if (!withStars) return
+        stepParticles()
         c.save()
         c.scale(scale, scale)
-        for ((i, s) in stars.withIndex()) {
-            val y = (((s.second - scroll * 0.12f * s.third) % viewH) + viewH) % viewH
-            val tw = 0.5f + 0.5f * sin(anim * 2f + i)
-            val rgb = if (RAINBOW_DARK) (rainbow(i * 25f) and 0xFFFFFF) else 0xFFFFFF
-            p.color = ((60 + 140 * tw).toInt() shl 24) or rgb
-            c.drawCircle(s.first, y, s.third * 0.8f, p)
+        // плавные световые линии
+        p.style = Paint.Style.STROKE
+        for (k in 0 until 2) {
+            val y0 = viewH * (0.25f + 0.42f * k)
+            val ph = anim * (0.5f + 0.2f * k) + k * 2f
+            bgPath.reset()
+            bgPath.moveTo(-10f, y0 + sin(ph) * 30f)
+            bgPath.cubicTo(W * 0.3f, y0 - 90f + sin(ph + 1f) * 40f, W * 0.65f, y0 + 90f + sin(ph + 2f) * 40f, W + 10f, y0 + sin(ph + 3f) * 30f)
+            p.strokeWidth = 6f
+            p.color = rainbow(k * 90f, 0x10)
+            c.drawPath(bgPath, p)
+            p.strokeWidth = 1.3f
+            p.color = rainbow(k * 90f, 0x3A)
+            c.drawPath(bgPath, p)
+        }
+        // светящиеся частицы
+        p.style = Paint.Style.FILL
+        for (i in 0 until partN) {
+            val tw = 0.5f + 0.5f * sin(anim * 2f + pPh[i])
+            p.color = rainbow(i * 18f, (0x12 + 0x14 * tw).toInt())
+            c.drawCircle(pX[i], pY[i], pS[i] * 3.2f, p)
+            p.color = rainbow(i * 18f, (0x50 + 0x90 * tw).toInt())
+            c.drawCircle(pX[i], pY[i], pS[i] * 1.1f, p)
         }
         if (bpHalloween) drawHalloweenDecor(c)
         c.restore()
+        // виньетка
+        p.shader = android.graphics.RadialGradient(w / 2f, h / 2f, max(w, h) * 0.78f, 0x00000000, 0xAA000000.toInt(), Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, w, h, p)
+        p.shader = null
     }
 
     private fun text(
@@ -1531,59 +1637,52 @@ class GameView(context: Context) : View(context) {
         }
         p.color = color
         c.drawRoundRect(x, y, x + w, y + h, rad, rad, p)
-        if (solid) {
-            p.style = Paint.Style.STROKE
-            p.strokeWidth = 1f
-            p.color = 0x22FFFFFF
-            c.drawRoundRect(x, y, x + w, y + h, rad, rad, p)
-            p.style = Paint.Style.FILL
-        }
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = 1.2f
+        p.color = withA(rainbow(x * 0.3f + y * 0.2f), if (solid) 0x70 else 0x44)
+        c.drawRoundRect(x, y, x + w, y + h, rad, rad, p)
+        p.style = Paint.Style.FILL
     }
 
     private fun btn(
         c: Canvas, label: String, x: Float, y: Float, w: Float, h: Float, color: Int,
         sub: String? = null, enabled: Boolean = true, onTap: () -> Unit,
     ) {
-        val col = if (enabled) color else k(0xFF3A3A4C)
-        val rad = min(h / 2f, 26f)
+        val rad = min(h / 2f, 22f)
+        val here = kotlin.math.abs(x - rippleBx) < 0.6f && kotlin.math.abs(y - rippleBy) < 0.6f
+        val pressT = if (here) rippleAge else 9f
+        val accent = if (enabled) lerpColor(rainbow(x * 0.4f + y * 0.2f), color, 0.22f) else 0xFF5A4A50.toInt()
         p.style = Paint.Style.FILL
         p.shader = null
         if (enabled) {
-            // мягкая тень (elevation) в три слоя
-            p.color = 0x12000000
-            c.drawRoundRect(x - 3f, y + 2f, x + w + 3f, y + h + 9f, rad + 3f, rad + 3f, p)
-            p.color = 0x1E000000
-            c.drawRoundRect(x - 1.5f, y + 2f, x + w + 1.5f, y + h + 6f, rad + 1.5f, rad + 1.5f, p)
-            p.color = 0x2E000000
-            c.drawRoundRect(x, y + 2f, x + w, y + h + 3f, rad, rad, p)
+            val boost = if (pressT < 0.2f) 1.8f else 1f
+            p.color = withA(accent, (0x16 * boost).toInt())
+            c.drawRoundRect(x - 5f, y - 3f, x + w + 5f, y + h + 8f, rad + 6f, rad + 6f, p)
+            p.color = withA(accent, (0x26 * boost).toInt())
+            c.drawRoundRect(x - 2.5f, y - 1.5f, x + w + 2.5f, y + h + 4f, rad + 3f, rad + 3f, p)
         }
-        p.color = col
-        c.drawRoundRect(x, y, x + w, y + h, rad, rad, p)
-        // светлый слой сверху, как у Material
+        val topC = if (enabled) lerpColor(0xFF2E0B17.toInt(), accent, if (pressT < 0.2f) 0.30f else 0.08f) else 0xFF1C1417.toInt()
+        val botC = if (enabled) 0xFF14040A.toInt() else 0xFF120D0F.toInt()
         p.color = 0xFF000000.toInt()
-        p.shader = LinearGradient(x, y, x, y + h, 0x26FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP)
+        p.shader = LinearGradient(x, y, x, y + h, topC, botC, Shader.TileMode.CLAMP)
         c.drawRoundRect(x, y, x + w, y + h, rad, rad, p)
         p.shader = null
-        // тонкая кромка
         p.style = Paint.Style.STROKE
-        p.strokeWidth = 1.2f
-        p.color = 0x33FFFFFF
+        p.strokeWidth = 1.7f
+        p.color = withA(accent, if (enabled) 0xE6 else 0x66)
         c.drawRoundRect(x, y, x + w, y + h, rad, rad, p)
-        if (RAINBOW_DARK && enabled) {
-            p.strokeWidth = 1.8f
-            p.color = (rainbow(x * 0.6f + y * 0.3f) and 0x00FFFFFF) or 0x99000000.toInt()
-            c.drawRoundRect(x, y, x + w, y + h, rad, rad, p)
-        }
+        p.strokeWidth = 1f
+        p.color = 0x22FFFFFF
+        c.drawRoundRect(x + 2f, y + 2f, x + w - 2f, y + h - 2f, rad - 2f, rad - 2f, p)
         p.style = Paint.Style.FILL
-        // волна от касания (ripple)
-        if (rippleAge < 0.5f && kotlin.math.abs(x - rippleBx) < 0.6f && kotlin.math.abs(y - rippleBy) < 0.6f) {
+        if (rippleAge < 0.5f && here) {
             val t = rippleAge / 0.5f
             val ez = 1f - (1f - t) * (1f - t)
             bpClip.reset()
             bpClip.addRoundRect(x, y, x + w, y + h, rad, rad, Path.Direction.CW)
             c.save()
             c.clipPath(bpClip)
-            p.color = (((1f - t) * 0x55).toInt() shl 24) or 0xFFFFFF
+            p.color = withA(accent, ((1f - t) * 0x55).toInt())
             c.drawCircle(rippleX, rippleY, max(w, h) * 1.1f * ez, p)
             c.restore()
         }
@@ -1591,7 +1690,7 @@ class GameView(context: Context) : View(context) {
             text(c, label, x + w / 2, y + h / 2 + h * 0.16f, h * 0.44f, maxW = w - 16f)
         } else {
             text(c, label, x + w / 2, y + h * 0.46f, h * 0.36f, maxW = w - 12f)
-            text(c, sub, x + w / 2, y + h * 0.82f, h * 0.24f, 0xFFFFF3C4.toInt(), maxW = w - 12f)
+            text(c, sub, x + w / 2, y + h * 0.82f, h * 0.24f, 0xFFFFC2D4.toInt(), maxW = w - 12f)
         }
         buttons.add(Btn(x, y, w, h, onTap))
     }
@@ -1612,7 +1711,7 @@ class GameView(context: Context) : View(context) {
         if (id != 0) BitmapFactory.decodeResource(resources, id) else null
     }
 
-    /** Загрузка при входе: тёмный фон, логотип TB, полоса прогресса. Поверх всего, на время касания не пропускает. */
+    /** Загрузка при входе: тёмный фон, красно-розовое свечение, частицы, логотип TB и TILCAYO BYPASS. */
     private fun drawSplash(c: Canvas, dt: Float) {
         if (splashAge >= splashTotal) return
         splashAge += dt
@@ -1624,47 +1723,76 @@ class GameView(context: Context) : View(context) {
         val layered = a < 0.999f
         if (layered) c.saveLayerAlpha(0f, 0f, w, h, (a * 255).toInt())
 
+        fun rv(t0: Float, t1: Float): Float {
+            val t = ((splashAge - t0) / (t1 - t0)).coerceIn(0f, 1f)
+            return 1f - (1f - t) * (1f - t) * (1f - t)
+        }
+
+        val cx = w / 2f
         p.style = Paint.Style.FILL
         p.color = 0xFF000000.toInt()
-        p.shader = LinearGradient(0f, 0f, 0f, h, 0xFF06030C.toInt(), 0xFF140A22.toInt(), Shader.TileMode.CLAMP)
+        p.shader = LinearGradient(0f, 0f, 0f, h, 0xFF030106.toInt(), 0xFF12040B.toInt(), Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, w, h, p)
-        p.shader = android.graphics.RadialGradient(w / 2f, h * 0.42f, w * 0.8f, 0x44FF245F, 0x00FF245F, Shader.TileMode.CLAMP)
+        val glowT = rv(0.1f, 1.3f)
+        p.shader = android.graphics.RadialGradient(
+            cx, h * 0.36f, w * (0.25f + 0.85f * glowT), rainbow(0f, (0x66 * glowT).toInt()), 0x00000000, Shader.TileMode.CLAMP,
+        )
         c.drawRect(0f, 0f, w, h, p)
         p.shader = null
 
-        val t = min(1f, splashAge / 0.7f)
-        val ez = 1f - (1f - t) * (1f - t) * (1f - t)
-        val size = min(w * 0.46f, 220f * d)
-        val cx = w / 2f
-        val cy = h * 0.42f
-        val sc = 0.8f + 0.2f * ez
+        // частицы
+        stepParticles()
+        val pa = rv(0.3f, 1.0f)
+        for (i in 0 until partN) {
+            val tw = 0.5f + 0.5f * sin(anim * 2f + pPh[i])
+            p.color = rainbow(i * 18f, ((0x12 + 0x14 * tw) * pa).toInt())
+            c.drawCircle(pX[i] * scale, pY[i] * scale, pS[i] * 3.2f * scale, p)
+            p.color = rainbow(i * 18f, ((0x50 + 0x90 * tw) * pa).toInt())
+            c.drawCircle(pX[i] * scale, pY[i] * scale, pS[i] * 1.1f * scale, p)
+        }
+
+        // логотип TB
+        val size = min(w * 0.34f, 150f * d)
+        val cy = h * 0.30f
+        val lt = rv(0.5f, 1.3f)
+        val sc = 0.82f + 0.18f * lt
         c.save()
         c.scale(sc, sc, cx, cy)
-        // Логотип строится текстом, поэтому не зависит от наличия tb_logo в ресурсах.
-        p.setShadowLayer(22f * d, 0f, 0f, 0xFFFF245F.toInt())
-        text(c, "TILCAYO", cx, cy + size * 0.06f, size * 0.24f, (ez * 255).toInt() shl 24 or 0xFFFFFF, shadow = false, maxW = w - 36f * d)
-        p.clearShadowLayer()
-        text(c, "B Y P A S S", cx, cy + size * 0.22f, size * 0.09f, (ez * 255).toInt() shl 24 or 0xFFFF7399.toInt(), shadow = false, maxW = w - 40f * d)
+        val logo = tbLogo
+        if (logo != null) {
+            splashRect.set(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f)
+            p.color = withA(rainbow(0f), (0x40 * lt).toInt())
+            c.drawRoundRect(splashRect.left - 10f * d, splashRect.top - 10f * d, splashRect.right + 10f * d, splashRect.bottom + 10f * d, size * 0.3f, size * 0.3f, p)
+            splashPaint.alpha = (lt * 255).toInt()
+            c.drawBitmap(logo, null, splashRect, splashPaint)
+        }
         c.restore()
 
-        val tt = (ez * 255).toInt() shl 24
-        text(c, "VISUAL MOD  •  MOBILE EDITION", cx, cy + size / 2f + 44f * d, 11f * d, tt or 0xFFFFFF, shadow = false, maxW = w - 40f * d)
+        // название
+        val y1 = cy + size / 2f + 58f * d
+        val ta = rv(1.0f, 1.7f)
+        c.saveLayerAlpha(0f, 0f, w, h, (ta * 255).toInt())
+        neonTitle(c, "TILCAYO", cx, y1, 40f * d, w * 0.8f)
+        neonTitle(c, "BYPASS", cx, y1 + 50f * d, 46f * d, w * 0.8f)
+        c.restore()
+        val sa = rv(1.5f, 2.1f)
+        text(c, "Толстый Тилкайо", cx, y1 + 84f * d, 13f * d, withA(0xFFFFC2D4.toInt(), (sa * 200).toInt()), shadow = false)
 
         // полоса загрузки
         val barW = w * 0.5f
-        val barH = 6f * d
-        val by = h * 0.74f
+        val barH = 5f * d
+        val by = h * 0.80f
         val prog = min(1f, splashAge / (splashTotal - fade))
         p.color = 0x33FFFFFF
         c.drawRoundRect(cx - barW / 2f, by, cx + barW / 2f, by + barH, barH / 2f, barH / 2f, p)
         p.color = 0xFF000000.toInt()
         p.shader = LinearGradient(
             cx - barW / 2f, 0f, cx + barW / 2f, 0f,
-            intArrayOf(0xFFFF245F.toInt(), 0xFFB51C70.toInt(), 0xFFFF8BA8.toInt()), null, Shader.TileMode.CLAMP,
+            intArrayOf(rainbow(0f), rainbow(90f), rainbow(180f)), null, Shader.TileMode.CLAMP,
         )
         c.drawRoundRect(cx - barW / 2f, by, cx - barW / 2f + barW * prog, by + barH, barH / 2f, barH / 2f, p)
         p.shader = null
-        text(c, "INITIALIZING BYPASS…", cx, by + 30f * d, 11f * d, 0xAAFFFFFF.toInt(), shadow = false)
+        text(c, "Загрузка…", cx, by + 28f * d, 12f * d, 0x99FFFFFF.toInt(), shadow = false)
 
         if (layered) c.restore()
     }
@@ -2619,99 +2747,56 @@ class GameView(context: Context) : View(context) {
 
     private fun drawMenu(c: Canvas) {
         checkUpdates()
-        // TILCAYO BYPASS: тёмная космическая тема с красно-розовым свечением.
-        drawBackground(c, k(0xFF05040A), k(0xFF170817), anim * 24f)
+        drawBackground(c, k(0xFF1B1035), k(0xFF5A2A8A), anim * 40f)
         c.save()
         c.translate(uiOx, uiOy)
         c.scale(ui, ui)
 
-        // Неоновый ореол в верхней части экрана.
-        p.style = Paint.Style.FILL
-        p.shader = RadialGradient(180f, 138f, 190f,
-            intArrayOf(0x44FF245F, 0x18B51C70, 0x00000000), null, Shader.TileMode.CLAMP)
-        c.drawRect(0f, 0f, 360f, 300f, p)
-        p.shader = null
+        val enter = min(1f, sceneTime / 0.45f)
+        val enterEz = 1f - (1f - enter) * (1f - enter)
+        if (enter < 1f) c.saveLayerAlpha(-300f, -300f, 1000f, 1600f, (enterEz * 255).toInt())
+        c.translate(0f, (1f - enterEz) * 16f)
 
-        // Тонкие декоративные линии и пульсирующие точки.
-        val pulse = 0.55f + 0.45f * sin(anim * 2.1f)
-        p.style = Paint.Style.STROKE
-        p.strokeWidth = 1f
-        p.color = (0x30 + 25 * pulse).toInt() shl 24 or 0x00FF527D
-        c.drawRoundRect(17f, 62f, 343f, 220f, 22f, 22f, p)
-        p.style = Paint.Style.FILL
-        for (i in 0 until 22) {
-            val x = (i * 71f + 13f) % 360f
-            val y = (i * 47f + anim * (12f + i % 3 * 5f)) % 430f
-            val a = (35f + 115f * (0.5f + 0.5f * sin(anim * 2.4f + i))).toInt().coerceIn(0, 180)
-            p.color = (a shl 24) or if (i % 4 == 0) 0x00FFFFFF else 0x00FF4778
-            c.drawCircle(x, y, if (i % 4 == 0) 1.8f else 1.2f, p)
-        }
-
-        // Логотип с мягким красным свечением и движущимся бликом.
-        val titleY = 112f + sin(anim * 1.5f) * 2f
-        p.color = 0x55FF174F
-        p.setShadowLayer(18f, 0f, 0f, 0xFFFF174F.toInt())
-        text(c, "TILCAYO", 180f, titleY, 43f, 0xFFF7F3F7.toInt(), shadow = false)
-        p.clearShadowLayer()
-        text(c, "B Y P A S S", 180f, 146f, 17f, 0xFFFF668F.toInt(), shadow = false)
-        p.style = Paint.Style.STROKE
-        p.strokeWidth = 1f
-        p.color = 0x88FF4778.toInt()
-        c.drawLine(95f, 163f, 265f, 163f, p)
-        p.style = Paint.Style.FILL
-        text(c, "VISUAL MOD  •  MOBILE EDITION", 180f, 181f, 9f, 0x99FFFFFF.toInt(), shadow = false)
+        neonTitle(c, "TILCAYO", 180f, 122f, 58f)
+        neonTitle(c, "BYPASS", 180f, 186f, 64f)
+        text(c, "Толстый Тилкайо · прыгай · собирай · размножай", 180f, 212f, 12f, 0xCCFFC2D4.toInt(), maxW = 330f)
 
         val lvl = save.level(save.selected)
         val bob = sin(anim * 2.5f)
-        // Персонаж остаётся настоящим игровым спрайтом, а не картинкой-заглушкой.
-        p.color = 0x44FF245F
-        p.setShadowLayer(22f, 0f, 0f, 0xFFFF245F.toInt())
-        c.drawCircle(180f, 333f + bob * 3f, 51f + 3f * sin(anim * 2f), p)
-        p.clearShadowLayer()
-        drawTilcayo(c, 180f, 333f + bob * 7f, 37f + lvl * 2.4f, 1, bob * 3f,
-            1f + bob * 0.025f, 1f - bob * 0.025f, lvl, save.skinOf(save.selected))
-        text(c, Balance.names[save.selected % Balance.names.size].uppercase() + "  ·  LVL $lvl",
-            180f, 410f, 13f, 0xFFDCCBD7.toInt())
+        drawTilcayo(c, 180f, 345f + bob * 8f, 38f + lvl * 2.6f, 1, bob * 4f, 1f + bob * 0.03f, 1f - bob * 0.03f, lvl, save.skinOf(save.selected))
+        text(c, Balance.names[save.selected % Balance.names.size] + " · ур. $lvl", 180f, 440f, 19f, 0xFFFFF3C4.toInt())
 
-        // Главная кнопка — акцентная, остальные выдержаны в одной неоновой системе.
-        btn(c, "▶  PLAY", 38f, 432f, 284f, 64f, k(0xFFD91F58), sub = "START RUN") { startRun() }
-        btn(c, "PET FARM", 38f, 507f, 136f, 55f, k(0xFF642A68),
-            sub = if (save.pending() > 0) "+${save.pending()} COINS" else if (save.freeBoxes > 0) "BOX WAITING" else "YOUR PETS") { goFarm() }
-        btn(c, "BOSS RUSH", 186f, 507f, 136f, 55f, k(0xFF8E234A), sub = "CHALLENGE") { scene = Scene.RUSH; sceneTime = 0f }
-        btn(c, "MODIFIERS", 38f, 572f, 180f, 52f, k(0xFF3D234D),
-            sub = if (Mods.count(save.mods) > 0) "${Mods.count(save.mods)} ENABLED" else "CUSTOMIZE RUN") { scene = Scene.MODS; sceneTime = 0f }
-        btn(c, if (save.sound) "♫ SOUND ON" else "♫ SOUND OFF", 228f, 572f, 94f, 52f,
-            k(0xFF48263F), sub = "AUDIO") { toggleSound() }
+        btn(c, "▶  ИГРАТЬ", 50f, 462f, 260f, 78f, k(0xFF00C853)) { startRun() }
+        btn(c, "🐾  ФЕРМА", 50f, 552f, 126f, 58f, k(0xFF7C4DFF),
+            sub = if (save.pending() > 0) "+${save.pending()} 💰" else if (save.freeBoxes > 0) "🎁 бокс ждёт" else null) { goFarm() }
+        btn(c, "⚔  БОСС-РАШ", 184f, 552f, 126f, 58f, k(0xFFE53935)) { scene = Scene.RUSH; sceneTime = 0f }
+        val mc = Mods.count(save.mods)
+        btn(c, "⚙  МОДИФИКАТОРЫ", 50f, 622f, 200f, 56f, k(0xFF00897B),
+            sub = if (mc > 0) "$mc вкл · монеты x" + "%.2f".format(Mods.multiplier(save.mods)) else "нет") { scene = Scene.MODS; sceneTime = 0f }
+        btn(c, if (save.sound) "🔊" else "🔇", 258f, 622f, 52f, 56f, k(0xFF5C6BC0)) { toggleSound() }
         val passLvl = HPass.level(save)
         val passCan = HPass.claimable(save)
-        btn(c, "HALLOWEEN PASS", 38f, 634f, 284f, 49f, k(0xFF732447),
-            sub = if (passCan > 0) "LVL $passLvl / ${HPass.LEVELS}  •  $passCan REWARDS" else "LVL $passLvl / ${HPass.LEVELS}") {
+        btn(c, "🎃  ХЕЛЛОУИН-ПАСС", 50f, 690f, 260f, 56f, k(0xFFFF6D00),
+            sub = if (passCan > 0) "ур. $passLvl / ${HPass.LEVELS} · наград: $passCan" else "ур. $passLvl / ${HPass.LEVELS}") {
             scene = Scene.PASS; sceneTime = 0f
         }
 
-        // Верхние счётчики — стеклянные карточки с красной кромкой.
-        panel(c, 18f, 18f, 132f, 32f, 0x88200D1A.toInt(), 12f)
-        p.style = Paint.Style.STROKE; p.strokeWidth = 1f; p.color = 0x66FF4778.toInt()
-        c.drawRoundRect(18f, 18f, 150f, 50f, 12f, 12f, p); p.style = Paint.Style.FILL
-        text(c, "◈  ${save.coins}", 29f, 39f, 15f, 0xFFFFD9E4.toInt(), Paint.Align.LEFT, maxW = 110f)
-        panel(c, 210f, 18f, 132f, 32f, 0x88200D1A.toInt(), 12f)
-        p.style = Paint.Style.STROKE; p.strokeWidth = 1f; p.color = 0x66FF4778.toInt()
-        c.drawRoundRect(210f, 18f, 342f, 50f, 12f, 12f, p); p.style = Paint.Style.FILL
-        text(c, "★  ${save.best} m", 222f, 39f, 15f, 0xFFFFEAF0.toInt(), Paint.Align.LEFT, maxW = 110f)
-
-        // Обновление показываем только если оно доступно; не перекрываем кнопки.
+        // плашка «доступно обновление» — только в главном меню
         if (save.remoteCode > installedCode && save.dismissedCode != save.remoteCode) {
-            panel(c, 24f, 691f, 312f, 83f, 0xEE210D20.toInt(), 16f)
-            text(c, "UPDATE AVAILABLE · ${save.remoteName}", 36f, 711f, 12f,
-                0xFFFF9DB6.toInt(), Paint.Align.LEFT, maxW = 286f)
+            panel(c, 10f, 698f, 340f, 90f, 0xEE0D47A1.toInt(), 18f)
+            text(c, "🔔 Доступна версия ${save.remoteName}", 20f, 722f, 16f, 0xFFFFFFFF.toInt(), Paint.Align.LEFT, maxW = 320f)
             if (save.remoteNotes.isNotBlank()) {
-                val lines = wrap(save.remoteNotes, 10f, 282f).take(2)
-                for ((j, ln) in lines.withIndex()) text(c, ln, 36f, 726f + j * 11f, 10f,
-                    0xCCFFFFFF.toInt(), Paint.Align.LEFT, shadow = false)
+                for ((j, ln) in wrap(save.remoteNotes, 10.5f, 320f).take(2).withIndex()) text(c, ln, 20f, 738f + j * 12f, 10.5f, 0xCCFFFFFF.toInt(), Paint.Align.LEFT, shadow = false)
             }
-            btn(c, "UPDATE", 36f, 739f, 124f, 28f, k(0xFFD91F58)) { openDownload() }
-            btn(c, "LATER", 172f, 739f, 92f, 28f, k(0xFF48263F)) { save.dismissedCode = save.remoteCode; save.save() }
+            btn(c, "СКАЧАТЬ", 20f, 748f, 150f, 34f, k(0xFF00C853)) { openDownload() }
+            btn(c, "ПОЗЖЕ", 180f, 748f, 100f, 34f, k(0xFF5C6BC0)) { save.dismissedCode = save.remoteCode; save.save() }
         }
+
+        panel(c, 20f, 20f, 120f, 34f, 0xAA2A0A14.toInt())
+        text(c, "💰 ${save.coins}", 30f, 44f, 20f, 0xFFFFE6EE.toInt(), Paint.Align.LEFT, maxW = 104f)
+        panel(c, 220f, 20f, 120f, 34f, 0xAA2A0A14.toInt())
+        text(c, "🏆 ${save.best} м", 230f, 44f, 20f, 0xFFFFE6EE.toInt(), Paint.Align.LEFT, maxW = 104f)
+        if (enter < 1f) c.restore()
         c.restore()
     }
 
