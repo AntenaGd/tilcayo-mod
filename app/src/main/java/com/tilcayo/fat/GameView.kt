@@ -1242,8 +1242,6 @@ class GameView(context: Context) : View(context) {
                     performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                     sfx.play(Sfx.S.JUMP)
                     dust(ev.x, ev.y, 6, 0xFFFFFFFF.toInt())
-                    ring(ev.x, ev.y, 0xFF65E7FF.toInt())
-                    sparkle(ev.x, ev.y, 0xFFC18BFF.toInt())
                 }
                 Ev.AIR -> {
                     sfx.play(Sfx.S.AIR, 1f + (MAX_AIR - sim.jumpsLeft) * 0.12f)
@@ -1256,7 +1254,6 @@ class GameView(context: Context) : View(context) {
                 Ev.LAND -> {
                     sfx.play(Sfx.S.LAND, 0.9f + rnd.nextFloat() * 0.2f, 0.7f)
                     dust(ev.x - sim.side * sim.r * 0.3f, ev.y, 8, 0xFFE0D6FF.toInt())
-                    ring(ev.x, ev.y, 0xFFFFD36E.toInt())
                 }
                 Ev.COIN -> {
                     combo++
@@ -1631,7 +1628,7 @@ class GameView(context: Context) : View(context) {
         p.color = 0xFF000000.toInt()
         p.shader = LinearGradient(0f, 0f, 0f, h, 0xFF06030C.toInt(), 0xFF140A22.toInt(), Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, w, h, p)
-        p.shader = android.graphics.RadialGradient(w / 2f, h * 0.42f, w * 0.8f, 0x38FF7A00, 0x00FF7A00, Shader.TileMode.CLAMP)
+        p.shader = android.graphics.RadialGradient(w / 2f, h * 0.42f, w * 0.8f, 0x44FF245F, 0x00FF245F, Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, w, h, p)
         p.shader = null
 
@@ -1643,18 +1640,15 @@ class GameView(context: Context) : View(context) {
         val sc = 0.8f + 0.2f * ez
         c.save()
         c.scale(sc, sc, cx, cy)
-        val logo = tbLogo
-        if (logo != null) {
-            splashRect.set(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f)
-            splashPaint.alpha = (ez * 255).toInt()
-            c.drawBitmap(logo, null, splashRect, splashPaint)
-        } else {
-            text(c, "TB", cx, cy + size * 0.18f, size * 0.55f, rainbow(0f), shadow = false)
-        }
+        // Логотип строится текстом, поэтому не зависит от наличия tb_logo в ресурсах.
+        p.setShadowLayer(22f * d, 0f, 0f, 0xFFFF245F.toInt())
+        text(c, "TILCAYO", cx, cy + size * 0.06f, size * 0.24f, (ez * 255).toInt() shl 24 or 0xFFFFFF, shadow = false, maxW = w - 36f * d)
+        p.clearShadowLayer()
+        text(c, "B Y P A S S", cx, cy + size * 0.22f, size * 0.09f, (ez * 255).toInt() shl 24 or 0xFFFF7399.toInt(), shadow = false, maxW = w - 40f * d)
         c.restore()
 
         val tt = (ez * 255).toInt() shl 24
-        text(c, "ТОЛСТЫЙ ТИЛКАЙО", cx, cy + size / 2f + 44f * d, 20f * d, tt or 0xFFFFFF, shadow = false, maxW = w - 40f * d)
+        text(c, "VISUAL MOD  •  MOBILE EDITION", cx, cy + size / 2f + 44f * d, 11f * d, tt or 0xFFFFFF, shadow = false, maxW = w - 40f * d)
 
         // полоса загрузки
         val barW = w * 0.5f
@@ -1666,11 +1660,11 @@ class GameView(context: Context) : View(context) {
         p.color = 0xFF000000.toInt()
         p.shader = LinearGradient(
             cx - barW / 2f, 0f, cx + barW / 2f, 0f,
-            intArrayOf(0xFFFFD600.toInt(), 0xFFFF6D00.toInt(), 0xFFFF1744.toInt()), null, Shader.TileMode.CLAMP,
+            intArrayOf(0xFFFF245F.toInt(), 0xFFB51C70.toInt(), 0xFFFF8BA8.toInt()), null, Shader.TileMode.CLAMP,
         )
         c.drawRoundRect(cx - barW / 2f, by, cx - barW / 2f + barW * prog, by + barH, barH / 2f, barH / 2f, p)
         p.shader = null
-        text(c, "Загрузка…", cx, by + 30f * d, 13f * d, 0xAAFFFFFF.toInt(), shadow = false)
+        text(c, "INITIALIZING BYPASS…", cx, by + 30f * d, 11f * d, 0xAAFFFFFF.toInt(), shadow = false)
 
         if (layered) c.restore()
     }
@@ -2033,25 +2027,6 @@ class GameView(context: Context) : View(context) {
             val sx = 1f + squash * 0.22f - stretch
             val sy = 1f - squash * 0.22f + stretch
             val faceDir = if (onWall) -side else face
-            // Новые визуальные эффекты: аура в воздухе и короткий цветной след.
-            val airborne = !onWall && abs(pvy) > 45f
-            if (airborne) {
-                val pulse = (sin(anim * 10f) + 1f) * 0.5f
-                p.style = Paint.Style.STROKE
-                p.strokeWidth = 2f + pulse * 1.5f
-                p.color = if (pvy < 0f) 0x995FE8FF.toInt() else 0x99C18BFF.toInt()
-                rect.set(px - r * (1.25f + pulse * 0.12f), py - r * (1.45f + pulse * 0.12f),
-                    px + r * (1.25f + pulse * 0.12f), py + r * (1.45f + pulse * 0.12f))
-                c.drawOval(rect, p)
-                p.style = Paint.Style.FILL
-                // Частицы следа появляются не каждый кадр, чтобы не перегружать телефон.
-                if ((anim * 18f).toInt() % 3 == 0 && particles.size < 180) {
-                    val trailColor = if (pvy < 0f) 0xFF65E7FF.toInt() else 0xFFC18BFF.toInt()
-                    particles.add(Particle(px - faceDir * r * 0.45f, py + r * 0.55f,
-                        (rnd.nextFloat() - 0.5f) * 36f, 35f + rnd.nextFloat() * 45f,
-                        0.28f, 0.28f, trailColor, 2f + rnd.nextFloat() * 2.5f))
-                }
-            }
             // перед срывом тилкайо дрожит, вокруг него тает кольцо «хватки»
             val g = (sim.gripT / Phys.GRIP_TIME)
             val tremble = if (onWall && g > 0.7f) sin(anim * 70f) * (min(1f, g) - 0.7f) * 7f else 0f
@@ -2644,50 +2619,99 @@ class GameView(context: Context) : View(context) {
 
     private fun drawMenu(c: Canvas) {
         checkUpdates()
-        drawBackground(c, k(0xFF1B1035), k(0xFF5A2A8A), anim * 40f)
+        // TILCAYO BYPASS: тёмная космическая тема с красно-розовым свечением.
+        drawBackground(c, k(0xFF05040A), k(0xFF170817), anim * 24f)
         c.save()
         c.translate(uiOx, uiOy)
         c.scale(ui, ui)
 
-        text(c, "ТОЛСТЫЙ", 180f, 118f, 54f, if (RAINBOW_DARK) rainbow(0f) else k(0xFFFFD54F))
-        text(c, "ТИЛКАЙО", 180f, 176f, 60f, if (RAINBOW_DARK) rainbow(120f) else k(0xFFFFFFFF))
-        text(c, "прыгай · собирай · откармливай · размножай", 180f, 206f, 13f, 0xBBFFFFFF.toInt(), maxW = 330f)
+        // Неоновый ореол в верхней части экрана.
+        p.style = Paint.Style.FILL
+        p.shader = RadialGradient(180f, 138f, 190f,
+            intArrayOf(0x44FF245F, 0x18B51C70, 0x00000000), null, Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, 360f, 300f, p)
+        p.shader = null
+
+        // Тонкие декоративные линии и пульсирующие точки.
+        val pulse = 0.55f + 0.45f * sin(anim * 2.1f)
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = 1f
+        p.color = (0x30 + 25 * pulse).toInt() shl 24 or 0x00FF527D
+        c.drawRoundRect(17f, 62f, 343f, 220f, 22f, 22f, p)
+        p.style = Paint.Style.FILL
+        for (i in 0 until 22) {
+            val x = (i * 71f + 13f) % 360f
+            val y = (i * 47f + anim * (12f + i % 3 * 5f)) % 430f
+            val a = (35f + 115f * (0.5f + 0.5f * sin(anim * 2.4f + i))).toInt().coerceIn(0, 180)
+            p.color = (a shl 24) or if (i % 4 == 0) 0x00FFFFFF else 0x00FF4778
+            c.drawCircle(x, y, if (i % 4 == 0) 1.8f else 1.2f, p)
+        }
+
+        // Логотип с мягким красным свечением и движущимся бликом.
+        val titleY = 112f + sin(anim * 1.5f) * 2f
+        p.color = 0x55FF174F
+        p.setShadowLayer(18f, 0f, 0f, 0xFFFF174F.toInt())
+        text(c, "TILCAYO", 180f, titleY, 43f, 0xFFF7F3F7.toInt(), shadow = false)
+        p.clearShadowLayer()
+        text(c, "B Y P A S S", 180f, 146f, 17f, 0xFFFF668F.toInt(), shadow = false)
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = 1f
+        p.color = 0x88FF4778.toInt()
+        c.drawLine(95f, 163f, 265f, 163f, p)
+        p.style = Paint.Style.FILL
+        text(c, "VISUAL MOD  •  MOBILE EDITION", 180f, 181f, 9f, 0x99FFFFFF.toInt(), shadow = false)
 
         val lvl = save.level(save.selected)
         val bob = sin(anim * 2.5f)
-        drawTilcayo(c, 180f, 345f + bob * 8f, 38f + lvl * 2.6f, 1, bob * 4f, 1f + bob * 0.03f, 1f - bob * 0.03f, lvl, save.skinOf(save.selected))
-        text(c, Balance.names[save.selected % Balance.names.size] + " · ур. $lvl", 180f, 440f, 19f, 0xFFFFF3C4.toInt())
+        // Персонаж остаётся настоящим игровым спрайтом, а не картинкой-заглушкой.
+        p.color = 0x44FF245F
+        p.setShadowLayer(22f, 0f, 0f, 0xFFFF245F.toInt())
+        c.drawCircle(180f, 333f + bob * 3f, 51f + 3f * sin(anim * 2f), p)
+        p.clearShadowLayer()
+        drawTilcayo(c, 180f, 333f + bob * 7f, 37f + lvl * 2.4f, 1, bob * 3f,
+            1f + bob * 0.025f, 1f - bob * 0.025f, lvl, save.skinOf(save.selected))
+        text(c, Balance.names[save.selected % Balance.names.size].uppercase() + "  ·  LVL $lvl",
+            180f, 410f, 13f, 0xFFDCCBD7.toInt())
 
-        btn(c, "▶  ИГРАТЬ", 50f, 462f, 260f, 78f, k(0xFF00C853)) { startRun() }
-        btn(c, "🐾  ФЕРМА", 50f, 552f, 126f, 58f, k(0xFF7C4DFF),
-            sub = if (save.pending() > 0) "+${save.pending()} 💰" else if (save.freeBoxes > 0) "🎁 бокс ждёт" else null) { goFarm() }
-        btn(c, "⚔  БОСС-РАШ", 184f, 552f, 126f, 58f, k(0xFFE53935)) { scene = Scene.RUSH; sceneTime = 0f }
-        val mc = Mods.count(save.mods)
-        btn(c, "⚙  МОДИФИКАТОРЫ", 50f, 622f, 200f, 56f, k(0xFF00897B),
-            sub = if (mc > 0) "$mc вкл · монеты x" + "%.2f".format(Mods.multiplier(save.mods)) else "нет") { scene = Scene.MODS; sceneTime = 0f }
-        btn(c, if (save.sound) "🔊" else "🔇", 258f, 622f, 52f, 56f, k(0xFF5C6BC0)) { toggleSound() }
+        // Главная кнопка — акцентная, остальные выдержаны в одной неоновой системе.
+        btn(c, "▶  PLAY", 38f, 432f, 284f, 64f, k(0xFFD91F58), sub = "START RUN") { startRun() }
+        btn(c, "PET FARM", 38f, 507f, 136f, 55f, k(0xFF642A68),
+            sub = if (save.pending() > 0) "+${save.pending()} COINS" else if (save.freeBoxes > 0) "BOX WAITING" else "YOUR PETS") { goFarm() }
+        btn(c, "BOSS RUSH", 186f, 507f, 136f, 55f, k(0xFF8E234A), sub = "CHALLENGE") { scene = Scene.RUSH; sceneTime = 0f }
+        btn(c, "MODIFIERS", 38f, 572f, 180f, 52f, k(0xFF3D234D),
+            sub = if (Mods.count(save.mods) > 0) "${Mods.count(save.mods)} ENABLED" else "CUSTOMIZE RUN") { scene = Scene.MODS; sceneTime = 0f }
+        btn(c, if (save.sound) "♫ SOUND ON" else "♫ SOUND OFF", 228f, 572f, 94f, 52f,
+            k(0xFF48263F), sub = "AUDIO") { toggleSound() }
         val passLvl = HPass.level(save)
         val passCan = HPass.claimable(save)
-        btn(c, "🎃  ХЕЛЛОУИН-ПАСС", 50f, 690f, 260f, 56f, k(0xFFFF6D00),
-            sub = if (passCan > 0) "ур. $passLvl / ${HPass.LEVELS} · наград: $passCan" else "ур. $passLvl / ${HPass.LEVELS}") {
+        btn(c, "HALLOWEEN PASS", 38f, 634f, 284f, 49f, k(0xFF732447),
+            sub = if (passCan > 0) "LVL $passLvl / ${HPass.LEVELS}  •  $passCan REWARDS" else "LVL $passLvl / ${HPass.LEVELS}") {
             scene = Scene.PASS; sceneTime = 0f
         }
 
-        // плашка «доступно обновление» — только в главном меню
-        if (save.remoteCode > installedCode && save.dismissedCode != save.remoteCode) {
-            panel(c, 10f, 698f, 340f, 90f, 0xEE0D47A1.toInt(), 18f)
-            text(c, "🔔 Доступна версия ${save.remoteName}", 20f, 722f, 16f, 0xFFFFFFFF.toInt(), Paint.Align.LEFT, maxW = 320f)
-            if (save.remoteNotes.isNotBlank()) {
-                for ((j, ln) in wrap(save.remoteNotes, 10.5f, 320f).take(2).withIndex()) text(c, ln, 20f, 738f + j * 12f, 10.5f, 0xCCFFFFFF.toInt(), Paint.Align.LEFT, shadow = false)
-            }
-            btn(c, "СКАЧАТЬ", 20f, 748f, 150f, 34f, k(0xFF00C853)) { openDownload() }
-            btn(c, "ПОЗЖЕ", 180f, 748f, 100f, 34f, k(0xFF5C6BC0)) { save.dismissedCode = save.remoteCode; save.save() }
-        }
+        // Верхние счётчики — стеклянные карточки с красной кромкой.
+        panel(c, 18f, 18f, 132f, 32f, 0x88200D1A, 12f)
+        p.style = Paint.Style.STROKE; p.strokeWidth = 1f; p.color = 0x66FF4778.toInt()
+        c.drawRoundRect(18f, 18f, 150f, 50f, 12f, 12f, p); p.style = Paint.Style.FILL
+        text(c, "◈  ${save.coins}", 29f, 39f, 15f, 0xFFFFD9E4.toInt(), Paint.Align.LEFT, maxW = 110f)
+        panel(c, 210f, 18f, 132f, 32f, 0x88200D1A, 12f)
+        p.style = Paint.Style.STROKE; p.strokeWidth = 1f; p.color = 0x66FF4778.toInt()
+        c.drawRoundRect(210f, 18f, 342f, 50f, 12f, 12f, p); p.style = Paint.Style.FILL
+        text(c, "★  ${save.best} m", 222f, 39f, 15f, 0xFFFFEAF0.toInt(), Paint.Align.LEFT, maxW = 110f)
 
-        panel(c, 20f, 20f, 120f, 34f, 0x66000000)
-        text(c, "💰 ${save.coins}", 30f, 44f, 20f, 0xFFFFE082.toInt(), Paint.Align.LEFT, maxW = 104f)
-        panel(c, 220f, 20f, 120f, 34f, 0x66000000)
-        text(c, "🏆 ${save.best} м", 230f, 44f, 20f, 0xFFFFFFFF.toInt(), Paint.Align.LEFT, maxW = 104f)
+        // Обновление показываем только если оно доступно; не перекрываем кнопки.
+        if (save.remoteCode > installedCode && save.dismissedCode != save.remoteCode) {
+            panel(c, 24f, 691f, 312f, 83f, 0xEE210D20.toInt(), 16f)
+            text(c, "UPDATE AVAILABLE · ${save.remoteName}", 36f, 711f, 12f,
+                0xFFFF9DB6.toInt(), Paint.Align.LEFT, maxW = 286f)
+            if (save.remoteNotes.isNotBlank()) {
+                val lines = wrap(save.remoteNotes, 10f, 282f).take(2)
+                for ((j, ln) in lines.withIndex()) text(c, ln, 36f, 726f + j * 11f, 10f,
+                    0xCCFFFFFF.toInt(), Paint.Align.LEFT, shadow = false)
+            }
+            btn(c, "UPDATE", 36f, 739f, 124f, 28f, k(0xFFD91F58)) { openDownload() }
+            btn(c, "LATER", 172f, 739f, 92f, 28f, k(0xFF48263F)) { save.dismissedCode = save.remoteCode; save.save() }
+        }
         c.restore()
     }
 
