@@ -989,6 +989,7 @@ class GameView(context: Context) : View(context) {
         last = now
         anim += dt * (if (bpAnimOn) bpAnimSpeed else 0f)
         sceneTime += dt
+        rippleAge += dt
         toastT = max(0f, toastT - dt)
         buttons.clear()
         if (bpInfCoins && save.coins < 900_000_000L) save.coins = 999_999_999L
@@ -1030,6 +1031,7 @@ class GameView(context: Context) : View(context) {
         }
         if (bpLayer) c.restore()
         drawBypass(c, dt)
+        drawSplash(c, dt)
         postInvalidateOnAnimation()
     }
 
@@ -1038,6 +1040,7 @@ class GameView(context: Context) : View(context) {
     // =====================================================================
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (splashAge < splashTotal) return true
         if (bpTouch(e)) return true
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN ->
@@ -1091,6 +1094,7 @@ class GameView(context: Context) : View(context) {
         if (scene == Scene.DEAD && sceneTime < 0.5f) return
         val hit = buttons.asReversed().firstOrNull { ux >= it.x && ux <= it.x + it.w && uy >= it.y && uy <= it.y + it.h }
         if (hit != null) {
+            rippleX = ux; rippleY = uy; rippleBx = hit.x; rippleBy = hit.y; rippleAge = 0f
             performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
             sfx.play(Sfx.S.CLICK)
             hit.onTap()
@@ -1469,8 +1473,8 @@ class GameView(context: Context) : View(context) {
     }
 
     private fun drawBackground(c: Canvas, top: Int, bottom: Int, scroll: Float, withStars: Boolean = true) {
-        val topCol = if (RAINBOW_DARK) k(0xFF05030F) else top
-        val botCol = if (RAINBOW_DARK) lerpColor(k(0xFF0A0618), rainbow(0f), 0.25f) else bottom
+        val topCol = if (RAINBOW_DARK) k(0xFF020106) else top
+        val botCol = if (RAINBOW_DARK) lerpColor(k(0xFF060310), rainbow(0f), 0.10f) else bottom
         p.style = Paint.Style.FILL
         p.color = 0xFF000000.toInt() // альфа краски домножается на шейдер, поэтому она обязана быть непрозрачной
         p.shader = LinearGradient(0f, 0f, 0f, height.toFloat(), topCol, botCol, Shader.TileMode.CLAMP)
@@ -1517,31 +1521,72 @@ class GameView(context: Context) : View(context) {
 
     private fun darken(color: Int) = lerpColor(color, 0xFF000000.toInt(), 0.35f)
 
-    private fun panel(c: Canvas, x: Float, y: Float, w: Float, h: Float, color: Int = 0x66000000, rad: Float = 16f) {
+    private fun panel(c: Canvas, x: Float, y: Float, w: Float, h: Float, color: Int = 0x66000000, rad: Float = 18f) {
         p.style = Paint.Style.FILL
+        p.shader = null
+        val solid = (color ushr 24) > 0x20
+        if (solid) {
+            p.color = 0x22000000
+            c.drawRoundRect(x, y + 3f, x + w, y + h + 4f, rad, rad, p)
+        }
         p.color = color
         c.drawRoundRect(x, y, x + w, y + h, rad, rad, p)
+        if (solid) {
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = 1f
+            p.color = 0x22FFFFFF
+            c.drawRoundRect(x, y, x + w, y + h, rad, rad, p)
+            p.style = Paint.Style.FILL
+        }
     }
 
     private fun btn(
         c: Canvas, label: String, x: Float, y: Float, w: Float, h: Float, color: Int,
         sub: String? = null, enabled: Boolean = true, onTap: () -> Unit,
     ) {
-        val col = if (enabled) color else k(0xFF55556A)
+        val col = if (enabled) color else k(0xFF3A3A4C)
+        val rad = min(h / 2f, 26f)
         p.style = Paint.Style.FILL
-        p.color = darken(col)
-        c.drawRoundRect(x, y + 4f, x + w, y + h + 4f, 14f, 14f, p)
-        p.color = col
-        c.drawRoundRect(x, y, x + w, y + h, 14f, 14f, p)
-        if (RAINBOW_DARK && enabled) {
-            p.style = Paint.Style.STROKE
-            p.strokeWidth = 2.5f
-            p.color = rainbow(x * 0.6f + y * 0.3f)
-            c.drawRoundRect(x, y, x + w, y + h, 14f, 14f, p)
-            p.style = Paint.Style.FILL
+        p.shader = null
+        if (enabled) {
+            // мягкая тень (elevation) в три слоя
+            p.color = 0x12000000
+            c.drawRoundRect(x - 3f, y + 2f, x + w + 3f, y + h + 9f, rad + 3f, rad + 3f, p)
+            p.color = 0x1E000000
+            c.drawRoundRect(x - 1.5f, y + 2f, x + w + 1.5f, y + h + 6f, rad + 1.5f, rad + 1.5f, p)
+            p.color = 0x2E000000
+            c.drawRoundRect(x, y + 2f, x + w, y + h + 3f, rad, rad, p)
         }
+        p.color = col
+        c.drawRoundRect(x, y, x + w, y + h, rad, rad, p)
+        // светлый слой сверху, как у Material
+        p.color = 0xFF000000.toInt()
+        p.shader = LinearGradient(x, y, x, y + h, 0x26FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP)
+        c.drawRoundRect(x, y, x + w, y + h, rad, rad, p)
+        p.shader = null
+        // тонкая кромка
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = 1.2f
         p.color = 0x33FFFFFF
-        c.drawRoundRect(x + 4f, y + 3f, x + w - 4f, y + h * 0.48f, 11f, 11f, p)
+        c.drawRoundRect(x, y, x + w, y + h, rad, rad, p)
+        if (RAINBOW_DARK && enabled) {
+            p.strokeWidth = 1.8f
+            p.color = (rainbow(x * 0.6f + y * 0.3f) and 0x00FFFFFF) or 0x99000000.toInt()
+            c.drawRoundRect(x, y, x + w, y + h, rad, rad, p)
+        }
+        p.style = Paint.Style.FILL
+        // волна от касания (ripple)
+        if (rippleAge < 0.5f && kotlin.math.abs(x - rippleBx) < 0.6f && kotlin.math.abs(y - rippleBy) < 0.6f) {
+            val t = rippleAge / 0.5f
+            val ez = 1f - (1f - t) * (1f - t)
+            bpClip.reset()
+            bpClip.addRoundRect(x, y, x + w, y + h, rad, rad, Path.Direction.CW)
+            c.save()
+            c.clipPath(bpClip)
+            p.color = (((1f - t) * 0x55).toInt() shl 24) or 0xFFFFFF
+            c.drawCircle(rippleX, rippleY, max(w, h) * 1.1f * ez, p)
+            c.restore()
+        }
         if (sub == null) {
             text(c, label, x + w / 2, y + h / 2 + h * 0.16f, h * 0.44f, maxW = w - 16f)
         } else {
@@ -1549,6 +1594,82 @@ class GameView(context: Context) : View(context) {
             text(c, sub, x + w / 2, y + h * 0.82f, h * 0.24f, 0xFFFFF3C4.toInt(), maxW = w - 12f)
         }
         buttons.add(Btn(x, y, w, h, onTap))
+    }
+
+    // ----- Material-ripple и экран загрузки с логотипом TB -----
+    private var rippleAge = 9f
+    private var rippleX = 0f
+    private var rippleY = 0f
+    private var rippleBx = -999f
+    private var rippleBy = -999f
+
+    private var splashAge = 0f
+    private val splashTotal = 2.7f
+    private val splashPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val splashRect = RectF()
+    private val tbLogo: Bitmap? by lazy {
+        val id = resources.getIdentifier("tb_logo", "drawable", context.packageName)
+        if (id != 0) BitmapFactory.decodeResource(resources, id) else null
+    }
+
+    /** Загрузка при входе: тёмный фон, логотип TB, полоса прогресса. Поверх всего, на время касания не пропускает. */
+    private fun drawSplash(c: Canvas, dt: Float) {
+        if (splashAge >= splashTotal) return
+        splashAge += dt
+        val fade = 0.45f
+        val a = if (splashAge > splashTotal - fade) max(0f, (splashTotal - splashAge) / fade) else 1f
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val d = resources.displayMetrics.density
+        val layered = a < 0.999f
+        if (layered) c.saveLayerAlpha(0f, 0f, w, h, (a * 255).toInt())
+
+        p.style = Paint.Style.FILL
+        p.color = 0xFF000000.toInt()
+        p.shader = LinearGradient(0f, 0f, 0f, h, 0xFF06030C.toInt(), 0xFF140A22.toInt(), Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, w, h, p)
+        p.shader = android.graphics.RadialGradient(w / 2f, h * 0.42f, w * 0.8f, 0x38FF7A00, 0x00FF7A00, Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, w, h, p)
+        p.shader = null
+
+        val t = min(1f, splashAge / 0.7f)
+        val ez = 1f - (1f - t) * (1f - t) * (1f - t)
+        val size = min(w * 0.46f, 220f * d)
+        val cx = w / 2f
+        val cy = h * 0.42f
+        val sc = 0.8f + 0.2f * ez
+        c.save()
+        c.scale(sc, sc, cx, cy)
+        val logo = tbLogo
+        if (logo != null) {
+            splashRect.set(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f)
+            splashPaint.alpha = (ez * 255).toInt()
+            c.drawBitmap(logo, null, splashRect, splashPaint)
+        } else {
+            text(c, "TB", cx, cy + size * 0.18f, size * 0.55f, rainbow(0f), shadow = false)
+        }
+        c.restore()
+
+        val tt = (ez * 255).toInt() shl 24
+        text(c, "ТОЛСТЫЙ ТИЛКАЙО", cx, cy + size / 2f + 44f * d, 20f * d, tt or 0xFFFFFF, shadow = false, maxW = w - 40f * d)
+
+        // полоса загрузки
+        val barW = w * 0.5f
+        val barH = 6f * d
+        val by = h * 0.74f
+        val prog = min(1f, splashAge / (splashTotal - fade))
+        p.color = 0x33FFFFFF
+        c.drawRoundRect(cx - barW / 2f, by, cx + barW / 2f, by + barH, barH / 2f, barH / 2f, p)
+        p.color = 0xFF000000.toInt()
+        p.shader = LinearGradient(
+            cx - barW / 2f, 0f, cx + barW / 2f, 0f,
+            intArrayOf(0xFFFFD600.toInt(), 0xFFFF6D00.toInt(), 0xFFFF1744.toInt()), null, Shader.TileMode.CLAMP,
+        )
+        c.drawRoundRect(cx - barW / 2f, by, cx - barW / 2f + barW * prog, by + barH, barH / 2f, barH / 2f, p)
+        p.shader = null
+        text(c, "Загрузка…", cx, by + 30f * d, 13f * d, 0xAAFFFFFF.toInt(), shadow = false)
+
+        if (layered) c.restore()
     }
 
     private fun toast(msg: String) {
