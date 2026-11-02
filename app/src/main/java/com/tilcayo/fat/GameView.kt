@@ -50,6 +50,10 @@ class GameView(context: Context) : View(context) {
     )
     private class FxRing(val x: Float, val y: Float, val maxAge: Float, val color: Int, val maxR: Float, val flat: Float) { var age = 0f }
     private class TrailPt(val x: Float, val y: Float) { var age = 0f }
+    private class Notif(val text: String, val on: Boolean) { var age = 0f }
+    private class Crumb(val x: Float, val y: Float) { var age = 0f }
+    private class Ghost(val x: Float, val y: Float, val face: Int) { var age = 0f }
+    private class WPart(var x: Float, var y: Float, val sz: Float, val ph: Float)
     private class Pop(val x: Float, val y: Float, val text: String, val color: Int, val size: Float) { var life = 1f }
     private class Btn(val x: Float, val y: Float, val w: Float, val h: Float, val onTap: () -> Unit)
 
@@ -101,6 +105,7 @@ class GameView(context: Context) : View(context) {
     private val save = SaveData(context)
     private val sfx = Sfx(context)
     private val music = HalloweenMusic()
+    private val usfx = UiSfx()
     private val sprite: Bitmap = BitmapFactory.decodeResource(resources, R.drawable.tilcayo)
     private val skinBmps = arrayOfNulls<Bitmap>(Skins.all.size)
 
@@ -296,12 +301,16 @@ class GameView(context: Context) : View(context) {
         paused = false
     }
 
+    private fun sfxPlay(s: Sfx.S, rate: Float = 1f, vol: Float = 1f) {
+        sfx.play(s, rate, vol * bpSfxVol)
+    }
+
     private fun toggleSound() {
         save.sound = !save.sound
         sfx.enabled = save.sound
         music.setPlaying(save.sound)
         save.save()
-        sfx.play(Sfx.S.CLICK)
+        sfxPlay(Sfx.S.CLICK)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -355,6 +364,62 @@ class GameView(context: Context) : View(context) {
     private var bpFxAmbient = true
     private var bpFxPower = 1f
     private var bpTabT = 0f
+    private var bpMagnet = 0f
+    private var bpInfGrip = false
+    private var bpInfAmmo = false
+    private var bpNoSpikes = false
+    private var bpNoSaws = false
+    private var bpNoLasers = false
+    private var bpLavaMul = 1f
+    private var lavaBase = 1f
+    private var bpPalette = 0
+    private var bpShape = 0
+    private var bpTrailStyle = 0
+    private var bpAuraSize = 1f
+    private var bpUiHue = 0f
+    private var bpCatHue = 0f
+    private var bpCatRainbow = false
+    private var bpHat = 0
+    private var bpOrbit = 0
+    private var bpFxSpeed = true
+    private var bpFxFlash = true
+    private var bpFxSnd = true
+    private var bpMenuSnd = true
+    private var bpSfxVol = 1f
+    private var bpMusicVol = 0.55f
+    private var bpUiVol = 1f
+    private var fxFlash = 0f
+    private var bpTickV = -1f
+    private var bpRList = true
+    private var bpWater = true
+    private var bpNotif = true
+    private var bpTHud = true
+    private var bpTEsp = true
+    private var bpEsp = false
+    private var bpTracers = false
+    private var bpDmgNum = true
+    private var bpSky = 0
+    private var bpBright = 0f
+    private var bpWPart = 0
+    private var bpCrumbs = false
+    private var bpAfter = false
+    private var bpHalo = false
+    private var bpWings = false
+    private var bpFog = 0f
+    private val notifs = ArrayList<Notif>()
+    private val crumbs = ArrayList<Crumb>()
+    private val ghosts = ArrayList<Ghost>()
+    private val wparts = ArrayList<WPart>()
+    private var ghostAcc = 0f
+    private var crumbAcc = 0f
+    private var bossHpShown = 1f
+    private var fpsEma = 60f
+    private var lastDt = 0.016f
+    private val espTmp = FloatArray(2)
+    private val bpHats = listOf("", "👑", "🎩", "🎀")
+    private val bpOrbits = listOf("", "🦋", "🌸", "❄️")
+    private var catHueCache = -1f
+    private var catHueFilter: ColorMatrixColorFilter? = null
     private var bpOpen = false
     private var fabX = -1f
     private var fabY = -1f
@@ -405,7 +470,8 @@ class GameView(context: Context) : View(context) {
         if (scene == Scene.FARM) syncPets()
     }
 
-    private val bpTabs = listOf("Игрок", "Мир", "Ресурсы", "Ферма", "Визуал", "Меню")
+    private val bpTabs = listOf("🎮", "🌍", "💰", "🐾", "✨", "🎨", "👁", "🌌", "🔊", "⚙")
+    private val bpTabNames = listOf("Игрок", "Мир", "Ресурсы", "Ферма", "Визуал", "Косметика", "Рендер", "Мир-FX", "Звук", "Меню")
 
     private val bpPages: List<List<BpRow>> by lazy {
         val player = listOf(
@@ -425,12 +491,36 @@ class GameView(context: Context) : View(context) {
                 setF = { v -> bpBigSize = 0.5f + 4.5f * v; bpBig = true },
                 valueText = { "%.1f×".format(bpBigSize) }),
             BpRow("Кот-крутилка", true, { bpSpin }) { bpSpin = !bpSpin },
+            BpRow("🧲  Магнит монет", false, { false }, kind = 2,
+                getF = { bpMagnet },
+                setF = { v -> bpMagnet = v },
+                valueText = { if (bpMagnet < 0.02f) "выкл" else "${(40 + 260 * bpMagnet).toInt()}" }),
+            BpRow("🤲  Вечная хватка", true, { bpInfGrip }) { bpInfGrip = !bpInfGrip },
+            BpRow("🔫  Бесконечные патроны", true, { bpInfAmmo }) { bpInfAmmo = !bpInfAmmo },
         )
         val world = listOf(
             BpRow("🌋  Лава выключена", true, { bpNoLava }) { bpNoLava = !bpNoLava },
             BpRow("Радужный мир", true, { bpRainbowWorld }) { bpRainbowWorld = !bpRainbowWorld },
             BpRow("Радужная тема (вместо неона)", true, { RAINBOW_DARK }) { RAINBOW_DARK = !RAINBOW_DARK },
             BpRow("Хеллоуин-декор", true, { bpHalloween }) { bpHalloween = !bpHalloween },
+            BpRow("🌋  Скорость лавы", false, { false }, kind = 2,
+                getF = { (bpLavaMul - 0.1f) / 2.9f },
+                setF = { v -> bpLavaMul = 0.1f + 2.9f * v },
+                valueText = { "%.1f×".format(bpLavaMul) }),
+            BpRow("🔪  Без шипов", true, { bpNoSpikes }) { bpNoSpikes = !bpNoSpikes },
+            BpRow("⚙  Без пил и орбит", true, { bpNoSaws }) { bpNoSaws = !bpNoSaws },
+            BpRow("⚡  Без лазеров", true, { bpNoLasers }) { bpNoLasers = !bpNoLasers },
+            BpRow("👹  Босс: оставить 1 HP", false, { false }) {
+                bpDo {
+                    val b = sim.boss
+                    if (b != null && scene == Scene.PLAY && b.state != Boss.DEAD) {
+                        b.hp = 1
+                        "У босса остался 1 HP"
+                    } else {
+                        "Босса сейчас нет"
+                    }
+                }
+            },
         )
         val money = listOf(
             BpRow("∞  Бесконечные монеты", true, { bpInfCoins }) { bpInfCoins = !bpInfCoins },
@@ -503,10 +593,101 @@ class GameView(context: Context) : View(context) {
             BpRow("〰  Световой шлейф", true, { bpFxTrail }) { bpFxTrail = !bpFxTrail; bpSave() },
             BpRow("🌟  Аура кота", true, { bpFxAura }) { bpFxAura = !bpFxAura; bpSave() },
             BpRow("🌠  Падающие звёзды", true, { bpFxAmbient }) { bpFxAmbient = !bpFxAmbient; bpSave() },
+            BpRow("💨  Линии скорости", true, { bpFxSpeed }) { bpFxSpeed = !bpFxSpeed; bpSave() },
+            BpRow("⚡  Вспышки на боссах", true, { bpFxFlash }) { bpFxFlash = !bpFxFlash; bpSave() },
             BpRow("Сила эффектов", false, { false }, kind = 2,
                 getF = { (bpFxPower - 0.3f) / 1.7f },
                 setF = { v -> bpFxPower = 0.3f + 1.7f * v },
                 valueText = { "%.1f×".format(bpFxPower) }),
+        )
+        val cosmetics = listOf(
+            BpRow("🎨  Палитра", false, { false }, kind = 3,
+                opts = listOf("Радуга", "Неон", "Лёд", "Огонь"),
+                getI = { bpPalette },
+                setI = { i -> bpPalette = i; bpSave() }),
+            BpRow("✦  Форма частиц", false, { false }, kind = 3,
+                opts = listOf("Звезда", "Ромб", "Круг", "Крест"),
+                getI = { bpShape },
+                setI = { i -> bpShape = i; bpSave() }),
+            BpRow("〰  Стиль шлейфа", false, { false }, kind = 3,
+                opts = listOf("Лента", "Бусины", "Двойной"),
+                getI = { bpTrailStyle },
+                setI = { i -> bpTrailStyle = i; bpSave() }),
+            BpRow("🌟  Размер ауры", false, { false }, kind = 2,
+                getF = { (bpAuraSize - 0.5f) / 1.5f },
+                setF = { v -> bpAuraSize = 0.5f + 1.5f * v },
+                valueText = { "%.1f×".format(bpAuraSize) }),
+            BpRow("🎨  Цвет интерфейса", false, { false }, kind = 2,
+                getF = { bpUiHue / 360f },
+                setF = { v -> bpUiHue = 360f * v },
+                valueText = { "${bpUiHue.toInt()}°" }),
+            BpRow("🐱  Оттенок кота", false, { false }, kind = 2,
+                getF = { bpCatHue / 360f },
+                setF = { v -> bpCatHue = 360f * v },
+                valueText = { if (bpCatHue < 2f) "выкл" else "${bpCatHue.toInt()}°" }),
+            BpRow("🌈  Радужный кот", true, { bpCatRainbow }) { bpCatRainbow = !bpCatRainbow; bpSave() },
+            BpRow("🎩  Шляпа", false, { false }, kind = 3,
+                opts = listOf("Нет", "👑", "🎩", "🎀"),
+                getI = { bpHat },
+                setI = { i -> bpHat = i; bpSave() }),
+            BpRow("🦋  Спутники", false, { false }, kind = 3,
+                opts = listOf("Нет", "🦋", "🌸", "❄️"),
+                getI = { bpOrbit },
+                setI = { i -> bpOrbit = i; bpSave() }),
+            BpRow("Сбросить косметику", false, { false }) {
+                bpPalette = 0; bpShape = 0; bpTrailStyle = 0; bpAuraSize = 1f
+                bpUiHue = 0f; bpCatHue = 0f; bpCatRainbow = false; bpHat = 0; bpOrbit = 0
+                bpSave()
+            },
+        )
+        val render = listOf(
+            BpRow("📋  Список функций", true, { bpRList }) { bpRList = !bpRList; bpSave() },
+            BpRow("🏷  Ватермарк", true, { bpWater }) { bpWater = !bpWater; bpSave() },
+            BpRow("🔔  Уведомления", true, { bpNotif }) { bpNotif = !bpNotif; bpSave() },
+            BpRow("🎯  Target HUD босса", true, { bpTHud }) { bpTHud = !bpTHud; bpSave() },
+            BpRow("⭕  Target ESP", true, { bpTEsp }) { bpTEsp = !bpTEsp; bpSave() },
+            BpRow("🔲  ESP: рамки", true, { bpEsp }) { bpEsp = !bpEsp; bpSave() },
+            BpRow("📍  Трассеры", true, { bpTracers }) { bpTracers = !bpTracers; bpSave() },
+            BpRow("💥  Цифры урона", true, { bpDmgNum }) { bpDmgNum = !bpDmgNum; bpSave() },
+        )
+        val worldFx = listOf(
+            BpRow("🌅  Небо", false, { false }, kind = 3,
+                opts = listOf("Игра", "Закат", "Ночь", "Космос"),
+                getI = { bpSky },
+                setI = { i -> bpSky = i; bpSave() }),
+            BpRow("☀  Яркость мира", false, { false }, kind = 2,
+                getF = { bpBright },
+                setF = { v -> bpBright = v },
+                valueText = { if (bpBright < 0.02f) "выкл" else "${(bpBright * 100).toInt()}%" }),
+            BpRow("🌫  Туман", false, { false }, kind = 2,
+                getF = { bpFog },
+                setF = { v -> bpFog = v },
+                valueText = { if (bpFog < 0.02f) "выкл" else "${(bpFog * 100).toInt()}%" }),
+            BpRow("❄  Частицы мира", false, { false }, kind = 3,
+                opts = listOf("Нет", "Снег", "Угли", "Звёзды"),
+                getI = { bpWPart },
+                setI = { i -> bpWPart = i; bpSave() }),
+            BpRow("🍞  Хлебные крошки", true, { bpCrumbs }) { bpCrumbs = !bpCrumbs; bpSave() },
+            BpRow("👻  Эхо-силуэты", true, { bpAfter }) { bpAfter = !bpAfter; bpSave() },
+            BpRow("😇  Нимб", true, { bpHalo }) { bpHalo = !bpHalo; bpSave() },
+            BpRow("🪽  Крылья", true, { bpWings }) { bpWings = !bpWings; bpSave() },
+        )
+        val sound = listOf(
+            BpRow("🔊  Громкость эффектов", false, { false }, kind = 2,
+                getF = { bpSfxVol },
+                setF = { v -> bpSfxVol = v },
+                valueText = { "${(bpSfxVol * 100).toInt()}%" }),
+            BpRow("🎵  Громкость музыки", false, { false }, kind = 2,
+                getF = { bpMusicVol },
+                setF = { v -> bpMusicVol = v; music.setVolume(v) },
+                valueText = { "${(bpMusicVol * 100).toInt()}%" }),
+            BpRow("🎚  Громкость меню", false, { false }, kind = 2,
+                getF = { bpUiVol },
+                setF = { v -> bpUiVol = v; usfx.volume = v },
+                valueText = { "${(bpUiVol * 100).toInt()}%" }),
+            BpRow("🔔  Звуки меню", true, { bpMenuSnd }) { bpMenuSnd = !bpMenuSnd; bpSave() },
+            BpRow("💫  Звуки эффектов", true, { bpFxSnd }) { bpFxSnd = !bpFxSnd; bpSave() },
+            BpRow("🔇  Звук и музыка игры", true, { save.sound }) { toggleSound() },
         )
         val look = listOf(
             BpRow("Прозрачность фона", false, { false }, kind = 2,
@@ -529,14 +710,19 @@ class GameView(context: Context) : View(context) {
                 setF = { v -> bpDepth = 1.5f * v },
                 valueText = { "${(bpDepth * 100).toInt()}%" }),
         )
-        listOf(player, world, money, farm, visual, look)
+        listOf(player, world, money, farm, visual, cosmetics, render, worldFx, sound, look)
     }
 
     private fun bpCur(): List<BpRow> = bpPages[bpPage.coerceIn(0, bpPages.size - 1)]
 
     private fun bpSetSlider(i: Int, x: Float) {
         val row = bpCur().getOrNull(i) ?: return
-        row.setF(((x - bpTrackL) / (bpTrackR - bpTrackL)).coerceIn(0f, 1f))
+        val v = ((x - bpTrackL) / (bpTrackR - bpTrackL)).coerceIn(0f, 1f)
+        row.setF(v)
+        if (bpMenuSnd && abs(v - bpTickV) >= 0.05f) {
+            bpTickV = v
+            usfx.play(UiSfx.S.TICK, 0.7f + v * 1.1f, 0.5f)
+        }
     }
 
     /** Поворот оттенков всего экрана + чуть больше насыщенности. */
@@ -625,12 +811,15 @@ class GameView(context: Context) : View(context) {
         val before = HPass.level(save)
         save.passXp = min(save.passXp + xp, HPass.LEVELS * HPass.XP_PER_LEVEL)
         val after = HPass.level(save)
-        if (after > before) toast("🎃 Хеллоуин-пасс: уровень $after!")
+        if (after > before) {
+            toast("🎃 Хеллоуин-пасс: уровень $after!")
+            if (bpMenuSnd) usfx.play(UiSfx.S.LEVEL, 1f, 0.8f)
+        }
     }
 
     private fun claimPass(i: Int) {
         val msg = HPass.claim(save, i) ?: return
-        sfx.play(Sfx.S.CLICK)
+        sfxPlay(Sfx.S.CLICK)
         toast("🎁 $msg")
     }
 
@@ -638,7 +827,7 @@ class GameView(context: Context) : View(context) {
         var n = 0
         for (i in 0 until HPass.LEVELS) if (HPass.claim(save, i) != null) n++
         if (n > 0) {
-            sfx.play(Sfx.S.CLICK)
+            sfxPlay(Sfx.S.CLICK)
             toast("🎁 Получено наград: $n")
         }
     }
@@ -735,6 +924,38 @@ class GameView(context: Context) : View(context) {
             .putBoolean("fxAura", bpFxAura)
             .putBoolean("fxAmb", bpFxAmbient)
             .putFloat("fxPower", bpFxPower)
+            .putInt("palette", bpPalette)
+            .putInt("shape", bpShape)
+            .putInt("trailStyle", bpTrailStyle)
+            .putFloat("auraSize", bpAuraSize)
+            .putFloat("uiHue", bpUiHue)
+            .putFloat("catHue", bpCatHue)
+            .putBoolean("catRainbow", bpCatRainbow)
+            .putInt("hat", bpHat)
+            .putInt("orbit", bpOrbit)
+            .putBoolean("fxSpeed", bpFxSpeed)
+            .putBoolean("fxFlash", bpFxFlash)
+            .putBoolean("fxSnd", bpFxSnd)
+            .putBoolean("menuSnd", bpMenuSnd)
+            .putFloat("sfxVol", bpSfxVol)
+            .putFloat("musicVol", bpMusicVol)
+            .putFloat("uiVol", bpUiVol)
+            .putBoolean("rList", bpRList)
+            .putBoolean("water", bpWater)
+            .putBoolean("notif", bpNotif)
+            .putBoolean("tHud", bpTHud)
+            .putBoolean("tEsp", bpTEsp)
+            .putBoolean("esp", bpEsp)
+            .putBoolean("tracers", bpTracers)
+            .putBoolean("dmgNum", bpDmgNum)
+            .putInt("sky", bpSky)
+            .putFloat("bright", bpBright)
+            .putFloat("fog", bpFog)
+            .putInt("wPart", bpWPart)
+            .putBoolean("crumbs", bpCrumbs)
+            .putBoolean("after", bpAfter)
+            .putBoolean("halo", bpHalo)
+            .putBoolean("wings", bpWings)
             .apply()
     }
 
@@ -753,6 +974,40 @@ class GameView(context: Context) : View(context) {
         bpFxAura = sp.getBoolean("fxAura", true)
         bpFxAmbient = sp.getBoolean("fxAmb", true)
         bpFxPower = sp.getFloat("fxPower", 1f)
+        bpPalette = sp.getInt("palette", 0)
+        bpShape = sp.getInt("shape", 0)
+        bpTrailStyle = sp.getInt("trailStyle", 0)
+        bpAuraSize = sp.getFloat("auraSize", 1f)
+        bpUiHue = sp.getFloat("uiHue", 0f)
+        bpCatHue = sp.getFloat("catHue", 0f)
+        bpCatRainbow = sp.getBoolean("catRainbow", false)
+        bpHat = sp.getInt("hat", 0)
+        bpOrbit = sp.getInt("orbit", 0)
+        bpFxSpeed = sp.getBoolean("fxSpeed", true)
+        bpFxFlash = sp.getBoolean("fxFlash", true)
+        bpFxSnd = sp.getBoolean("fxSnd", true)
+        bpMenuSnd = sp.getBoolean("menuSnd", true)
+        bpSfxVol = sp.getFloat("sfxVol", 1f)
+        bpMusicVol = sp.getFloat("musicVol", 0.55f)
+        bpUiVol = sp.getFloat("uiVol", 1f)
+        bpRList = sp.getBoolean("rList", true)
+        bpWater = sp.getBoolean("water", true)
+        bpNotif = sp.getBoolean("notif", true)
+        bpTHud = sp.getBoolean("tHud", true)
+        bpTEsp = sp.getBoolean("tEsp", true)
+        bpEsp = sp.getBoolean("esp", false)
+        bpTracers = sp.getBoolean("tracers", false)
+        bpDmgNum = sp.getBoolean("dmgNum", true)
+        bpSky = sp.getInt("sky", 0)
+        bpBright = sp.getFloat("bright", 0f)
+        bpFog = sp.getFloat("fog", 0f)
+        bpWPart = sp.getInt("wPart", 0)
+        bpCrumbs = sp.getBoolean("crumbs", false)
+        bpAfter = sp.getBoolean("after", false)
+        bpHalo = sp.getBoolean("halo", false)
+        bpWings = sp.getBoolean("wings", false)
+        music.setVolume(bpMusicVol)
+        usfx.volume = bpUiVol
         val f = java.io.File(context.filesDir, "tb_bg.jpg")
         if (f.exists()) bpBgBmp = BitmapFactory.decodeFile(f.path)
     }
@@ -957,7 +1212,7 @@ class GameView(context: Context) : View(context) {
             bpPaint.style = Paint.Style.FILL
 
             // заголовок со свечением
-            val title = "Тилкайо  Bypass"
+            val title = "Bypass · " + bpTabNames.getOrElse(bpPage) { "" }
             text(c, title, px + pw / 2f, py + 34f * d, 23.5f * d, withA(rainbow(0f), 0x40), shadow = false, maxW = pw - 30f * d)
             text(c, title, px + pw / 2f, py + 34f * d, 22f * d, rainbow(0f), shadow = false, maxW = pw - 34f * d)
 
@@ -979,7 +1234,7 @@ class GameView(context: Context) : View(context) {
             for ((qi, nm) in bpTabs.withIndex()) {
                 val sel = qi == bpPage
                 text(
-                    c, nm, px + 12f * d + (qi + 0.5f) * tabW, tabTop + tabH * 0.66f, tabH * 0.38f,
+                    c, nm, px + 12f * d + (qi + 0.5f) * tabW, tabTop + tabH * 0.7f, tabH * 0.5f,
                     if (sel) 0xFF14060C.toInt() else 0xD0FFFFFF.toInt(), shadow = false, maxW = tabW - 6f * d,
                 )
             }
@@ -1111,7 +1366,7 @@ class GameView(context: Context) : View(context) {
                         val q = (((x - bpPx) / bpPw) * nTabs).toInt().coerceIn(0, nTabs - 1)
                         if (q != bpPage) {
                             performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            sfx.play(Sfx.S.CLICK)
+                            if (bpMenuSnd) usfx.play(UiSfx.S.TICK, 0.85f + q * 0.1f, 0.8f) else sfxPlay(Sfx.S.CLICK)
                             bpPage = q
                         }
                     } else if (y >= bpPy + bpHeadH && i in rows.indices) {
@@ -1127,12 +1382,21 @@ class GameView(context: Context) : View(context) {
                                     val q = (((x - bpSegL) / (bpSegR - bpSegL)) * n).toInt().coerceIn(0, n - 1)
                                     performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                                     row.setI(q)
+                                    if (bpMenuSnd) usfx.play(UiSfx.S.TICK, 1f + q * 0.12f, 0.7f)
                                 }
                             }
                             else -> {
                                 performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                sfx.play(Sfx.S.CLICK)
+                                sfxPlay(Sfx.S.CLICK, 1.2f, 0.5f)
                                 row.tap()
+                                if (bpNotif && row.kind == 0) {
+                                    notifs.add(Notif(row.label.trimStart { !it.isLetterOrDigit() }, row.get()))
+                                    if (notifs.size > 4) notifs.removeAt(0)
+                                }
+                                if (bpMenuSnd) {
+                                    if (row.kind == 0) usfx.play(if (row.get()) UiSfx.S.ON else UiSfx.S.OFF, 1f, 0.8f)
+                                    else usfx.play(UiSfx.S.POWER, 1f, 0.6f)
+                                }
                             }
                         }
                     }
@@ -1163,7 +1427,7 @@ class GameView(context: Context) : View(context) {
                     bpOpen = !bpOpen
                     if (bpOpen) bpPage = 0
                     if (bpOpen && scene == Scene.PLAY) paused = true
-                    sfx.play(Sfx.S.CLICK)
+                    if (bpMenuSnd) usfx.play(if (bpOpen) UiSfx.S.OPEN else UiSfx.S.CLOSE, 1f, 0.8f) else sfxPlay(Sfx.S.CLICK)
                 }
                 if (bpSlider >= 0) {
                     bpSlider = -1
@@ -1190,7 +1454,7 @@ class GameView(context: Context) : View(context) {
         if (bpInfCoins && save.coins < 900_000_000L) save.coins = 999_999_999L
         if (bpInfBoxes && save.freeBoxes < 50) save.freeBoxes = 99
         if (scene != Scene.PLAY && save.checkBirth()) {
-            sfx.play(Sfx.S.BREED)
+            sfxPlay(Sfx.S.BREED)
             toast("Родился малыш! 🍼")
         }
 
@@ -1225,7 +1489,34 @@ class GameView(context: Context) : View(context) {
             }
         }
         if (bpLayer) c.restore()
+        lastDt = dt
+        if (scene == Scene.PLAY && bpBright > 0.02f) {
+            p.style = Paint.Style.FILL
+            p.shader = null
+            p.color = withA(0xFFFFFFFF.toInt(), (bpBright * 70f).toInt())
+            c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), p)
+        }
+        if (scene == Scene.PLAY && bpFog > 0.02f) {
+            p.style = Paint.Style.FILL
+            p.shader = RadialGradient(
+                width / 2f, height / 2f, max(width, height) * 0.75f,
+                intArrayOf(0x00000000, withA(fxColor(0f, 255), 0x00), withA(fxColor(60f, 255), (bpFog * 150f).toInt())),
+                floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP,
+            )
+            c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), p)
+            p.shader = null
+        }
+        if (fxFlash > 0f) {
+            if (bpFxOn && bpFxFlash) {
+                p.style = Paint.Style.FILL
+                p.shader = null
+                p.color = withA(0xFFFFFFFF.toInt(), (min(1f, fxFlash) * 120f).toInt())
+                c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), p)
+            }
+            fxFlash = max(0f, fxFlash - dt * 2.6f)
+        }
         drawBypass(c, dt)
+        drawNotifs(c, dt)
         drawSplash(c, dt)
         postInvalidateOnAnimation()
     }
@@ -1275,7 +1566,7 @@ class GameView(context: Context) : View(context) {
             val wy = ry / scale
             if (virusTap(wx, wy)) return
             when {
-                wx > W - 54f && wy < 70f -> { paused = true; sfx.play(Sfx.S.CLICK) }
+                wx > W - 54f && wy < 70f -> { paused = true; sfxPlay(Sfx.S.CLICK) }
                 sim.boss != null && sim.ammo > 0 && hypot(wx - (W - 46f), wy - (viewH - 120f)) < 48f -> sim.shoot()
                 sim.inCannon != null -> sim.fireCannon()
                 sim.onWall -> sim.jump()
@@ -1291,7 +1582,7 @@ class GameView(context: Context) : View(context) {
         if (hit != null) {
             rippleX = ux; rippleY = uy; rippleBx = hit.x; rippleBy = hit.y; rippleAge = 0f
             performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-            sfx.play(Sfx.S.CLICK)
+            sfxPlay(Sfx.S.CLICK)
             hit.onTap()
         } else if (scene == Scene.FARM) {
             farmDown(ux, uy, id)
@@ -1347,10 +1638,11 @@ class GameView(context: Context) : View(context) {
     private fun startRun() {
         mode = Mode.NORMAL
         resetCommon()
-        fxStars.clear(); fxRings.clear(); trail.clear()
+        fxStars.clear(); fxRings.clear(); trail.clear(); crumbs.clear(); ghosts.clear(); wparts.clear(); bossHpShown = 1f
         val mods = save.mods
         sim.reset(runLevel, save.coinMultiplier() * Mods.multiplier(mods) * bpCoinMul, viewH)
-        sim.lavaMul = if (Mods.has(mods, Mods.LAVA)) 1.6f else 1f
+        lavaBase = if (Mods.has(mods, Mods.LAVA)) 1.6f else 1f
+        sim.lavaMul = lavaBase * bpLavaMul
         gen.reset()
         gen.sparse = Mods.has(mods, Mods.SPARSE)
         gen.dense = Mods.has(mods, Mods.DENSE)
@@ -1386,7 +1678,7 @@ class GameView(context: Context) : View(context) {
         )
         val t = texts[rnd.nextInt(texts.size)]
         viruses.add(Virus(8f + rnd.nextFloat() * (W - 226f), 110f + rnd.nextFloat() * (viewH - 330f), t.first, t.second))
-        sfx.play(Sfx.S.WARN, 1.5f, 0.5f)
+        sfxPlay(Sfx.S.WARN, 1.5f, 0.5f)
     }
 
     private fun stepPlay(dt: Float) {
@@ -1400,8 +1692,15 @@ class GameView(context: Context) : View(context) {
         if (bpGod) sim.shield = max(sim.shield, 1.5f)
         if (bpInfAir && sim.jumpsLeft < MAX_AIR) sim.jumpsLeft = MAX_AIR
         sim.lavaOn = !bpNoLava
+        if (bpInfGrip) sim.gripT = 0f
+        if (bpInfAmmo && sim.boss != null && sim.ammo < 3) sim.ammo = 3
+        if (bpNoSpikes) sim.spikes.clear()
+        if (bpNoSaws) { sim.saws.clear(); sim.orbits.clear() }
+        if (bpNoLasers) sim.lasers.clear()
+        if (mode == Mode.NORMAL) sim.lavaMul = lavaBase * bpLavaMul
         sim.step(dt)
         fxPlay(dt)
+        if (bpMagnet > 0.02f) fxMagnet()
         if (mode == Mode.NORMAL) gen.fill(sim.camY - 800f)
         handleEvents()
         sim.cleanup()
@@ -1430,7 +1729,8 @@ class GameView(context: Context) : View(context) {
         val height = -sim.minPy
         if (!newRecord && save.best > 0 && (height / 10f).toInt() > save.best) {
             newRecord = true
-            sfx.play(Sfx.S.RECORD)
+            sfxPlay(Sfx.S.RECORD)
+            if (bpFxOn && bpFxSnd) usfx.play(UiSfx.S.LEVEL, 1f, 0.8f)
             pops.add(Pop(W / 2, sim.camY + viewH * 0.3f, "НОВЫЙ РЕКОРД!", 0xFFFFD54F.toInt(), 26f))
         }
     }
@@ -1440,25 +1740,26 @@ class GameView(context: Context) : View(context) {
             when (ev.type) {
                 Ev.JUMP -> {
                     performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    sfx.play(Sfx.S.JUMP)
+                    sfxPlay(Sfx.S.JUMP)
                     dust(ev.x, ev.y, 6, 0xFFFFFFFF.toInt())
                     if (bpJumpMul > 1.01f) sim.pvy *= bpJumpMul
                     fxRing(ev.x, ev.y + sim.r * 0.4f, 46f, fxColor(0f))
                     starBurst(ev.x, ev.y, 8, 150f, 0f)
                 }
                 Ev.AIR -> {
-                    sfx.play(Sfx.S.AIR, 1f + (MAX_AIR - sim.jumpsLeft) * 0.12f)
+                    sfxPlay(Sfx.S.AIR, 1f + (MAX_AIR - sim.jumpsLeft) * 0.12f)
                     ring(ev.x, ev.y, 0xFF9BE7FF.toInt())
                     if (bpJumpMul > 1.01f) sim.pvy *= bpJumpMul
                     fxRing(ev.x, ev.y, 62f, fxColor(140f), 0.5f)
                     starBurst(ev.x, ev.y, 10, 180f, 140f)
+                    if (bpFxOn && bpFxSnd) usfx.play(UiSfx.S.WHOOSH, 0.9f + rnd.nextFloat() * 0.4f, 0.35f)
                 }
                 Ev.SLIP -> {
-                    sfx.play(Sfx.S.SLIP)
+                    sfxPlay(Sfx.S.SLIP)
                     dust(ev.x, ev.y, 6, 0xFFFFC0A0.toInt())
                 }
                 Ev.LAND -> {
-                    sfx.play(Sfx.S.LAND, 0.9f + rnd.nextFloat() * 0.2f, 0.7f)
+                    sfxPlay(Sfx.S.LAND, 0.9f + rnd.nextFloat() * 0.2f, 0.7f)
                     dust(ev.x - sim.side * sim.r * 0.3f, ev.y, 8, 0xFFE0D6FF.toInt())
                     fxRing(ev.x, ev.y, 40f, fxColor(220f), 0.3f)
                     starBurst(ev.x, ev.y, 6, 110f, 220f)
@@ -1467,7 +1768,8 @@ class GameView(context: Context) : View(context) {
                     combo++
                     comboT = 0.7f
                     starBurst(ev.x, ev.y, 4, 90f, 40f)
-                    sfx.play(Sfx.S.COIN, min(1.9f, 1f + combo * 0.06f))
+                    if (bpFxOn && bpFxSnd && (combo == 5 || combo == 10 || combo == 20 || combo == 30)) usfx.play(UiSfx.S.SPARKLE, 1f, 0.7f)
+                    sfxPlay(Sfx.S.COIN, min(1.9f, 1f + combo * 0.06f))
                     sparkle(ev.x, ev.y, 0xFFFFD54F.toInt())
                     pops.add(Pop(ev.x, ev.y - 8f, "+" + fmt(sim.coinMul), 0xFFFFE082.toInt(), 13f))
                 }
@@ -1476,24 +1778,25 @@ class GameView(context: Context) : View(context) {
                     gotSnacks++
                     save.herd[save.selected] = min(Balance.MAX_FAT, save.herd[save.selected] + sn.fat)
                     save.save()
-                    sfx.play(Sfx.S.EAT)
+                    sfxPlay(Sfx.S.EAT)
                     sparkle(sn.x, sn.y, 0xFFFF8A65.toInt())
                     pops.add(Pop(sn.x, sn.y - 10f, "ням! +${sn.fat} жира", 0xFFFFAB91.toInt(), 14f))
                 }
                 Ev.SMASH -> {
-                    sfx.play(Sfx.S.SMASH)
+                    sfxPlay(Sfx.S.SMASH)
                     shake = max(shake, 0.15f)
                     sparkle(ev.x, ev.y, 0xFFCFD8DC.toInt())
                     fxRing(ev.x, ev.y, 54f, fxColor(300f), 0.6f)
                     starBurst(ev.x, ev.y, 9, 160f, 300f)
                     pops.add(Pop(ev.x, ev.y - 10f, "+" + fmt(sim.coinMul * 3), 0xFFFFE082.toInt(), 16f))
                 }
-                Ev.CANNON_IN -> sfx.play(Sfx.S.CAN_IN)
+                Ev.CANNON_IN -> sfxPlay(Sfx.S.CAN_IN)
                 Ev.CANNON_FIRE -> {
                     val a = ev.ref as Float
                     shake = 0.35f
-                    sfx.play(Sfx.S.CAN_FIRE)
-                    sfx.play(Sfx.S.SHIELD)
+                    fxFlash = 0.35f
+                    sfxPlay(Sfx.S.CAN_FIRE)
+                    sfxPlay(Sfx.S.SHIELD)
                     performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                     for (i in 0 until 20) {
                         val ang = a + (rnd.nextFloat() - 0.5f) * 1.2f
@@ -1503,7 +1806,7 @@ class GameView(context: Context) : View(context) {
                 }
                 Ev.BUMP -> {
                     (ev.ref as Bumper).pop = 0.3f
-                    sfx.play(Sfx.S.BUMP, 0.9f + rnd.nextFloat() * 0.3f)
+                    sfxPlay(Sfx.S.BUMP, 0.9f + rnd.nextFloat() * 0.3f)
                     ring(ev.x, ev.y, 0xFFFF8AD8.toInt())
                     fxRing(ev.x, ev.y, 50f, fxColor(320f), 0.8f)
                     starBurst(ev.x, ev.y, 7, 140f, 320f)
@@ -1513,25 +1816,33 @@ class GameView(context: Context) : View(context) {
                     bossBanner = 3f
                     bossHint = 6f
                     shake = 0.5f
-                    sfx.play(Sfx.S.BOSS_ROAR)
+                    sfxPlay(Sfx.S.BOSS_ROAR)
                     performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 }
-                Ev.BOSS_TELE -> sfx.play(Sfx.S.WARN)
+                Ev.BOSS_TELE -> sfxPlay(Sfx.S.WARN)
                 Ev.AMMO -> {
-                    sfx.play(Sfx.S.COIN, 1.7f)
+                    sfxPlay(Sfx.S.COIN, 1.7f)
                     sparkle(ev.x, ev.y, 0xFFFFD54F.toInt())
                     pops.add(Pop(ev.x, ev.y - 14f, "+патрон", 0xFFFFE082.toInt(), 15f))
                 }
-                Ev.SHOOT -> sfx.play(Sfx.S.THROW, 1.6f, 0.6f)
+                Ev.SHOOT -> sfxPlay(Sfx.S.THROW, 1.6f, 0.6f)
                 Ev.BULLET_BLOCK -> {
-                    sfx.play(Sfx.S.LAND, 1.4f)
+                    sfxPlay(Sfx.S.LAND, 1.4f)
                     pops.add(Pop(ev.x, ev.y - 14f, "он злой!", 0xFFFF8A80.toInt(), 15f))
                 }
-                Ev.BOSS_FIRE -> sfx.play(Sfx.S.LASER, 0.8f, 0.5f)
+                Ev.BOSS_FIRE -> sfxPlay(Sfx.S.LASER, 0.8f, 0.5f)
                 Ev.BOSS_HIT -> {
                     shake = 0.45f
+                    fxFlash = 0.6f
+                    if (bpDmgNum) {
+                        val crit = (ev.ref as? Int) == 0
+                        pops.add(Pop(ev.x, ev.y - 40f, if (crit) "-1 КРИТ!" else "-1", if (crit) 0xFFFFD54F.toInt() else 0xFFFF5470.toInt(), if (crit) 34f else 28f))
+                    }
+                    fxRing(ev.x, ev.y, 110f, fxColor(0f), 0.7f, 0.7f)
+                    starBurst(ev.x, ev.y, 30, 260f, 0f)
+                    if (bpFxOn && bpFxSnd) usfx.play(UiSfx.S.POWER, 0.9f, 0.6f)
                     bossHint = 0f
-                    sfx.play(Sfx.S.BOSS_HIT)
+                    sfxPlay(Sfx.S.BOSS_HIT)
                     performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                     sparkle(ev.x, ev.y, 0xFFFFFFFF.toInt())
                     for (i in 0 until 14) {
@@ -1543,7 +1854,13 @@ class GameView(context: Context) : View(context) {
                 }
                 Ev.BOSS_DEAD -> {
                     shake = 0.7f
-                    sfx.play(Sfx.S.BOSS_DEAD)
+                    fxFlash = 1f
+                    fxRing(ev.x, ev.y, 160f, fxColor(0f), 0.7f, 0.9f)
+                    fxRing(ev.x, ev.y, 110f, fxColor(120f), 0.5f, 0.7f)
+                    fxRing(ev.x, ev.y, 70f, fxColor(240f), 0.4f, 0.55f)
+                    starBurst(ev.x, ev.y, 90, 340f, 0f)
+                    if (bpFxOn && bpFxSnd) usfx.play(UiSfx.S.LEVEL, 1f, 0.9f)
+                    sfxPlay(Sfx.S.BOSS_DEAD)
                     if (mode == Mode.NORMAL) {
                         save.freeBoxes++
                         save.save()
@@ -1561,7 +1878,7 @@ class GameView(context: Context) : View(context) {
                         particles.add(Particle(ev.x, ev.y, cos(a) * sp, sin(a) * sp - 120f, 1.2f, 1.2f, blockColors[i % 5], 3f + rnd.nextFloat() * 4f))
                     }
                 }
-                Ev.LASER_ON -> if (ev.y > sim.camY && ev.y < sim.camY + viewH) sfx.play(Sfx.S.LASER, 1.4f, 0.4f)
+                Ev.LASER_ON -> if (ev.y > sim.camY && ev.y < sim.camY + viewH) sfxPlay(Sfx.S.LASER, 1.4f, 0.4f)
             }
         }
         sim.events.clear()
@@ -1589,7 +1906,7 @@ class GameView(context: Context) : View(context) {
         passGain(if (win) 60 else 15)
         save.save()
         deathReason = if (win) "" else sim.deathReason
-        sfx.play(if (win) Sfx.S.BOSS_DEAD else Sfx.S.DEATH)
+        sfxPlay(if (win) Sfx.S.BOSS_DEAD else Sfx.S.DEATH)
         performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         if (!win) for (i in 0 until 28) {
             val a = rnd.nextFloat() * 2f * PI.toFloat()
@@ -1612,7 +1929,7 @@ class GameView(context: Context) : View(context) {
         save.save()
         starBurst(sim.px, sim.py, 40, 320f, 0f)
         fxRing(sim.px, sim.py, 90f, fxColor(0f), 0.7f, 0.8f)
-        sfx.play(Sfx.S.DEATH)
+        sfxPlay(Sfx.S.DEATH)
         performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         for (i in 0 until 28) {
             val a = rnd.nextFloat() * 2f * PI.toFloat()
@@ -1656,8 +1973,13 @@ class GameView(context: Context) : View(context) {
 
     /** Яркий цвет эффектов: плавно гуляет по радуге. */
     private fun fxColor(off: Float, a: Int = 255): Int {
-        fxHsv[0] = ((anim * 70f + off) % 360f + 360f) % 360f
-        fxHsv[1] = 0.62f
+        val wv = 0.5f + 0.5f * sin(anim * 1.2f + off * 0.03f)
+        when (bpPalette) {
+            1 -> { fxHsv[0] = 285f + 55f * wv; fxHsv[1] = 0.7f }
+            2 -> { fxHsv[0] = 175f + 55f * wv; fxHsv[1] = 0.55f }
+            3 -> { fxHsv[0] = 4f + 46f * wv; fxHsv[1] = 0.85f }
+            else -> { fxHsv[0] = ((anim * 70f + off) % 360f + 360f) % 360f; fxHsv[1] = 0.62f }
+        }
         fxHsv[2] = 1f
         return android.graphics.Color.HSVToColor(a, fxHsv)
     }
@@ -1702,12 +2024,48 @@ class GameView(context: Context) : View(context) {
         fxRings.removeAll { it.age >= it.maxAge }
         for (t in trail) t.age += dt
         trail.removeAll { it.age > 0.45f }
+        for (cr in crumbs) cr.age += dt
+        crumbs.removeAll { it.age > 6f }
+        for (g in ghosts) g.age += dt
+        ghosts.removeAll { it.age > 0.4f }
+        if (bpWPart > 0 && bpFxOn && scene == Scene.PLAY) {
+            while (wparts.size < 46) {
+                wparts.add(WPart(34f + rnd.nextFloat() * 292f, sim.camY + rnd.nextFloat() * viewH, 1.5f + rnd.nextFloat() * 2.5f, rnd.nextFloat() * 6.28f))
+            }
+            for (wp in wparts) {
+                if (bpWPart == 1) wp.y += (35f + wp.sz * 12f) * dt
+                if (bpWPart == 2) wp.y -= (30f + wp.sz * 14f) * dt
+                wp.x += sin(anim * 1.3f + wp.ph) * 12f * dt
+                if (wp.y > sim.camY + viewH + 20f) wp.y = sim.camY - 10f
+                if (wp.y < sim.camY - 20f) wp.y = sim.camY + viewH + 10f
+                if (wp.x < 20f) wp.x = 340f
+                if (wp.x > 340f) wp.x = 20f
+            }
+        } else if (bpWPart == 0 && wparts.isNotEmpty()) {
+            wparts.clear()
+        }
     }
 
     /** Каждый шаг симуляции: точки шлейфа и звёздочки вокруг кота. */
     private fun fxPlay(dt: Float) {
         val kf = fxK()
         if (kf <= 0f) return
+        if (bpCrumbs) {
+            crumbAcc += dt
+            if (crumbAcc >= 0.15f) {
+                crumbAcc = 0f
+                if (!sim.dead) crumbs.add(Crumb(sim.px, sim.py))
+                if (crumbs.size > 160) crumbs.removeAt(0)
+            }
+        }
+        if (bpAfter) {
+            ghostAcc += dt
+            if (ghostAcc >= 0.045f) {
+                ghostAcc = 0f
+                if (!sim.onWall && sim.inCannon == null && !sim.dead) ghosts.add(Ghost(sim.px, sim.py, sim.face))
+                if (ghosts.size > 12) ghosts.removeAt(0)
+            }
+        }
         if (bpFxTrail) {
             trailAcc += dt
             if (trailAcc >= 0.012f) {
@@ -1736,6 +2094,21 @@ class GameView(context: Context) : View(context) {
     private fun drawFxBehind(c: Canvas) {
         val kf = fxK()
         if (kf <= 0f) return
+        if (bpFxSpeed && scene == Scene.PLAY && !sim.onWall && !sim.dead && abs(sim.pvy) > 380f) {
+            val inten = min(1f, (abs(sim.pvy) - 380f) / 300f)
+            val dir = if (sim.pvy > 0f) 1f else -1f
+            p.style = Paint.Style.STROKE
+            p.strokeCap = Paint.Cap.ROUND
+            p.strokeWidth = 1.6f
+            p.color = withA(0xFFFFFFFF.toInt(), (0x38 * inten).toInt())
+            for (i in 0 until 9) {
+                val lx = 34f + ((i * 97 + frameNo * 13) % 290)
+                val ly = sim.camY + ((i * 131 + frameNo * 29) % 800).toFloat() / 800f * viewH
+                c.drawLine(lx, ly, lx, ly - dir * (30f + 60f * inten), p)
+            }
+            p.strokeCap = Paint.Cap.BUTT
+            p.style = Paint.Style.FILL
+        }
         if (bpFxRings) {
             for (rg in fxRings) {
                 val t = (rg.age / rg.maxAge).coerceIn(0f, 1f)
@@ -1761,20 +2134,98 @@ class GameView(context: Context) : View(context) {
                 if (hypot(b.x - a.x, b.y - a.y) > 80f) continue
                 val f = (1f - b.age / 0.45f).coerceIn(0f, 1f)
                 val col = fxColor(i * 4f)
-                p.strokeWidth = (sim.r * 1.1f * f + 1f) * (0.7f + 0.3f * kf)
-                p.color = withA(col, (f * 70f).toInt())
-                c.drawLine(a.x, a.y, b.x, b.y, p)
-                p.strokeWidth = sim.r * 0.45f * f + 0.6f
-                p.color = withA(col, (f * 230f).toInt())
-                c.drawLine(a.x, a.y, b.x, b.y, p)
+                when (bpTrailStyle) {
+                    1 -> {
+                        p.style = Paint.Style.FILL
+                        p.color = withA(col, (f * 90f).toInt())
+                        c.drawCircle(b.x, b.y, sim.r * 0.7f * f + 1f, p)
+                        p.color = withA(col, (f * 240f).toInt())
+                        c.drawCircle(b.x, b.y, sim.r * 0.3f * f + 0.6f, p)
+                        p.style = Paint.Style.STROKE
+                    }
+                    2 -> {
+                        val wv = sin(i * 0.5f + anim * 9f) * sim.r * 0.7f * f
+                        p.strokeWidth = sim.r * 0.35f * f + 0.6f
+                        p.color = withA(col, (f * 230f).toInt())
+                        c.drawLine(a.x + wv, a.y, b.x + wv, b.y, p)
+                        p.color = withA(fxColor(i * 4f + 180f), (f * 230f).toInt())
+                        c.drawLine(a.x - wv, a.y, b.x - wv, b.y, p)
+                    }
+                    else -> {
+                        p.strokeWidth = (sim.r * 1.1f * f + 1f) * (0.7f + 0.3f * kf)
+                        p.color = withA(col, (f * 70f).toInt())
+                        c.drawLine(a.x, a.y, b.x, b.y, p)
+                        p.strokeWidth = sim.r * 0.45f * f + 0.6f
+                        p.color = withA(col, (f * 230f).toInt())
+                        c.drawLine(a.x, a.y, b.x, b.y, p)
+                    }
+                }
             }
             p.strokeCap = Paint.Cap.BUTT
             p.style = Paint.Style.FILL
         }
+        if (bpWPart > 0 && wparts.isNotEmpty() && scene == Scene.PLAY) {
+            p.style = Paint.Style.FILL
+            for (wp in wparts) {
+                when (bpWPart) {
+                    1 -> {
+                        p.color = 0xB0FFFFFF.toInt()
+                        c.drawCircle(wp.x, wp.y, wp.sz * 0.7f, p)
+                    }
+                    2 -> {
+                        p.color = 0x33FF8A3C
+                        c.drawCircle(wp.x, wp.y, wp.sz * 1.8f, p)
+                        p.color = 0xFFFFB347.toInt()
+                        c.drawCircle(wp.x, wp.y, wp.sz * 0.6f, p)
+                    }
+                    else -> star4(c, wp.x, wp.y, wp.sz * 1.1f, fxColor(wp.ph * 40f), 0.5f + 0.5f * sin(anim * 3f + wp.ph), anim * 40f + wp.ph * 30f)
+                }
+            }
+        }
+        if (bpCrumbs && crumbs.size > 1 && scene == Scene.PLAY) {
+            p.style = Paint.Style.STROKE
+            p.strokeCap = Paint.Cap.ROUND
+            p.strokeWidth = 1.4f
+            for (i in 1 until crumbs.size) {
+                val a = crumbs[i - 1]
+                val b = crumbs[i]
+                if (hypot(b.x - a.x, b.y - a.y) > 90f) continue
+                val f = (1f - b.age / 6f).coerceIn(0f, 1f)
+                p.color = withA(fxColor(i * 3f), (f * 140f).toInt())
+                c.drawLine(a.x, a.y, b.x, b.y, p)
+            }
+            p.style = Paint.Style.FILL
+            for (i in crumbs.indices) {
+                val b = crumbs[i]
+                val f = (1f - b.age / 6f).coerceIn(0f, 1f)
+                p.color = withA(fxColor(i * 3f), (f * 220f).toInt())
+                c.drawCircle(b.x, b.y, 2.2f, p)
+            }
+            p.strokeCap = Paint.Cap.BUTT
+        }
+        if (bpAfter && ghosts.isNotEmpty() && scene == Scene.PLAY) {
+            val bmp = spriteFor(save.skinOf(save.selected))
+            val gw = sim.r * 2.5f
+            val gh = min(gw * bmp.height / bmp.width, gw * 1.15f)
+            val gbig = if (bpBig) bpBigSize else 1f
+            for ((gi, g) in ghosts.withIndex()) {
+                val ga = (1f - g.age / 0.4f).coerceIn(0f, 1f)
+                bmpPaint.colorFilter = android.graphics.PorterDuffColorFilter(fxColor(gi * 30f), android.graphics.PorterDuff.Mode.SRC_ATOP)
+                bmpPaint.alpha = (ga * 110f).toInt()
+                c.save()
+                c.translate(g.x, g.y)
+                c.scale(g.face * gbig, gbig)
+                rect.set(-gw / 2f, -gh / 2f, gw / 2f, gh / 2f)
+                c.drawBitmap(bmp, null, rect, bmpPaint)
+                c.restore()
+            }
+            bmpPaint.colorFilter = null
+            bmpPaint.alpha = 255
+        }
         if (bpFxAura && scene == Scene.PLAY && sim.inCannon == null && !sim.dead) {
             val pulse = 1f + 0.12f * sin(anim * 4f)
             val big = if (bpBig) bpBigSize else 1f
-            val rr = sim.r * 2.6f * pulse * (0.8f + 0.2f * kf) * big
+            val rr = sim.r * 2.6f * pulse * (0.8f + 0.2f * kf) * big * bpAuraSize
             p.style = Paint.Style.FILL
             p.shader = RadialGradient(
                 sim.px, sim.py, rr,
@@ -1786,35 +2237,327 @@ class GameView(context: Context) : View(context) {
         }
     }
 
+    /** Частица выбранной формы с мягким свечением. */
+    private fun star4(c: Canvas, x: Float, y: Float, sz: Float, color: Int, a: Float, rot: Float) {
+        p.style = Paint.Style.FILL
+        p.color = withA(color, (a * 60f).toInt())
+        c.drawCircle(x, y, sz * 1.8f, p)
+        c.save()
+        c.translate(x, y)
+        c.rotate(rot)
+        p.color = withA(color, (a * 255f).toInt())
+        when (bpShape) {
+            1 -> {
+                fxPath.reset()
+                fxPath.moveTo(0f, -sz)
+                fxPath.lineTo(sz * 0.6f, 0f)
+                fxPath.lineTo(0f, sz)
+                fxPath.lineTo(-sz * 0.6f, 0f)
+                fxPath.close()
+                c.drawPath(fxPath, p)
+            }
+            2 -> c.drawCircle(0f, 0f, sz * 0.75f, p)
+            3 -> {
+                c.drawRect(-sz * 0.22f, -sz, sz * 0.22f, sz, p)
+                c.drawRect(-sz, -sz * 0.22f, sz, sz * 0.22f, p)
+            }
+            else -> {
+                fxPath.reset()
+                val ir = sz * 0.28f
+                fxPath.moveTo(0f, -sz)
+                fxPath.lineTo(ir, -ir)
+                fxPath.lineTo(sz, 0f)
+                fxPath.lineTo(ir, ir)
+                fxPath.lineTo(0f, sz)
+                fxPath.lineTo(-ir, ir)
+                fxPath.lineTo(-sz, 0f)
+                fxPath.lineTo(-ir, -ir)
+                fxPath.close()
+                c.drawPath(fxPath, p)
+            }
+        }
+        p.color = withA(0xFFFFFFFF.toInt(), (a * 200f).toInt())
+        c.drawCircle(0f, 0f, sz * 0.18f, p)
+        c.restore()
+    }
+
     /** Звёзды с мягким свечением: рисуются поверх кота. */
     private fun drawFxFront(c: Canvas) {
+        drawEsp(c)
+        drawTargetEsp(c)
         if (!bpFxOn || !bpFxStars || fxStars.isEmpty()) return
         val kf = fxK()
-        p.style = Paint.Style.FILL
         for (st in fxStars) {
             val a = (st.life / st.maxLife).coerceIn(0f, 1f)
-            val sz = st.size * (0.4f + 0.6f * a) * (0.8f + 0.2f * kf)
-            p.color = withA(st.color, (a * 60f).toInt())
-            c.drawCircle(st.x, st.y, sz * 1.8f, p)
-            c.save()
-            c.translate(st.x, st.y)
-            c.rotate(st.rot)
-            fxPath.reset()
-            val ir = sz * 0.28f
-            fxPath.moveTo(0f, -sz)
-            fxPath.lineTo(ir, -ir)
-            fxPath.lineTo(sz, 0f)
-            fxPath.lineTo(ir, ir)
-            fxPath.lineTo(0f, sz)
-            fxPath.lineTo(-ir, ir)
-            fxPath.lineTo(-sz, 0f)
-            fxPath.lineTo(-ir, -ir)
-            fxPath.close()
-            p.color = withA(st.color, (a * 255f).toInt())
-            c.drawPath(fxPath, p)
-            p.color = withA(0xFFFFFFFF.toInt(), (a * 200f).toInt())
-            c.drawCircle(0f, 0f, sz * 0.18f, p)
-            c.restore()
+            star4(c, st.x, st.y, st.size * (0.4f + 0.6f * a) * (0.8f + 0.2f * kf), st.color, a, st.rot)
+        }
+    }
+
+    /** Аура и звёзды вокруг кота в меню. */
+    private fun menuAura(c: Canvas, cx: Float, cy: Float, r: Float) {
+        if (!bpFxOn || !bpFxAura) return
+        val pulse = 1f + 0.1f * sin(anim * 3f)
+        val rr = r * 3.2f * pulse * bpAuraSize
+        p.style = Paint.Style.FILL
+        p.shader = RadialGradient(
+            cx, cy, rr,
+            intArrayOf(fxColor(0f, 0x55), fxColor(90f, 0x1C), 0x00000000),
+            floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP,
+        )
+        c.drawCircle(cx, cy, rr, p)
+        p.shader = null
+        if (bpFxStars) {
+            for (i in 0 until 7) {
+                val a = anim * (0.8f + 0.1f * (i % 3)) + i * 0.9f
+                val orr = r * (1.8f + 0.5f * sin(anim * 1.3f + i))
+                star4(
+                    c, cx + cos(a) * orr, cy + sin(a) * orr * 0.55f, 3f + (i % 3) * 1.5f,
+                    fxColor(i * 40f), 0.6f + 0.4f * sin(anim * 4f + i), anim * 90f + i * 40f,
+                )
+            }
+        }
+    }
+
+    /** Магнит: подбирает монеты в радиусе, как обычный подбор. */
+    private fun fxMagnet() {
+        val rad = 40f + 260f * bpMagnet
+        val rr = rad * rad
+        for (co in sim.coins) {
+            if (co.got) continue
+            val dx = co.x - sim.px
+            val dy = co.y - sim.py
+            if (dx * dx + dy * dy < rr) {
+                co.got = true
+                sim.runCoins += sim.coinMul
+                sim.events.add(Ev(Ev.COIN, co.x, co.y))
+            }
+        }
+    }
+
+    /** Цветовой фильтр для оттенка кота (кэшируется по градусам). */
+    private fun catFilter(deg: Float): ColorMatrixColorFilter {
+        val q = (deg / 4f).toInt() * 4f
+        val cached = catHueFilter
+        if (cached != null && q == catHueCache) return cached
+        val rad = Math.toRadians(q.toDouble())
+        val cs = cos(rad).toFloat()
+        val sn = sin(rad).toFloat()
+        val m = floatArrayOf(
+            0.213f + cs * 0.787f - sn * 0.213f, 0.715f - cs * 0.715f - sn * 0.715f, 0.072f - cs * 0.072f + sn * 0.928f, 0f, 0f,
+            0.213f - cs * 0.213f + sn * 0.143f, 0.715f + cs * 0.285f + sn * 0.140f, 0.072f - cs * 0.072f - sn * 0.283f, 0f, 0f,
+            0.213f - cs * 0.213f - sn * 0.787f, 0.715f - cs * 0.715f + sn * 0.715f, 0.072f + cs * 0.928f + sn * 0.072f, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f,
+        )
+        val f = ColorMatrixColorFilter(ColorMatrix(m))
+        catHueFilter = f
+        catHueCache = q
+        return f
+    }
+
+    // ---------- модули из Minecraft-клиентов: HUD, ESP, цели, уведомления ----------
+
+    private fun brackets(c: Canvas, l: Float, t: Float, r: Float, b: Float, len: Float) {
+        c.drawLine(l, t, l + len, t, p)
+        c.drawLine(l, t, l, t + len, p)
+        c.drawLine(r, t, r - len, t, p)
+        c.drawLine(r, t, r, t + len, p)
+        c.drawLine(l, b, l + len, b, p)
+        c.drawLine(l, b, l, b - len, p)
+        c.drawLine(r, b, r - len, b, p)
+        c.drawLine(r, b, r, b - len, p)
+    }
+
+    /** ESP: рамки на монетах, закусках, шипах, пилах и боссе, трассеры к целям. */
+    private fun drawEsp(c: Canvas) {
+        if (scene != Scene.PLAY || (!bpEsp && !bpTracers) || sim.dead) return
+        val top = sim.camY - 40f
+        val bot = sim.camY + viewH + 40f
+        p.style = Paint.Style.STROKE
+        p.strokeCap = Paint.Cap.ROUND
+        var lines = 0
+        for (co in sim.coins) {
+            if (co.got || co.y < top || co.y > bot) continue
+            if (bpEsp) {
+                p.strokeWidth = 1.6f
+                p.color = 0xFFFFD54F.toInt()
+                brackets(c, co.x - 14f, co.y - 14f, co.x + 14f, co.y + 14f, 6f)
+            }
+            if (bpTracers && lines < 6) {
+                val dx = co.x - sim.px
+                val dy = co.y - sim.py
+                if (dx * dx + dy * dy < 320f * 320f) {
+                    p.strokeWidth = 1.2f
+                    p.color = withA(0xFFFFD54F.toInt(), 0x55)
+                    c.drawLine(sim.px, sim.py, co.x, co.y, p)
+                    lines++
+                }
+            }
+        }
+        if (bpEsp) {
+            p.strokeWidth = 1.6f
+            p.color = 0xFF69F0AE.toInt()
+            for (sn in sim.snacks) {
+                if (sn.got || sn.y < top || sn.y > bot) continue
+                brackets(c, sn.x - 15f, sn.y - 15f, sn.x + 15f, sn.y + 15f, 6f)
+            }
+            p.color = 0xFFFF5470.toInt()
+            for (sp in sim.spikes) {
+                if (sp.y1 < top || sp.y0 > bot) continue
+                val x0 = if (sp.left) WALL else W - WALL - 24f
+                c.drawRect(x0, sp.y0, x0 + 24f, sp.y1, p)
+            }
+            for (sw in sim.saws) {
+                if (sw.dead) continue
+                sw.posAt(sim.time, espTmp)
+                if (espTmp[1] < top || espTmp[1] > bot) continue
+                c.drawCircle(espTmp[0], espTmp[1], 22f, p)
+                c.drawCircle(espTmp[0], espTmp[1], 26f + 2f * sin(anim * 6f), p)
+            }
+            for (o in sim.orbits) {
+                for (i in 0 until o.n) {
+                    if (!o.alive[i]) continue
+                    val a = o.angle(sim.time, i)
+                    val ox = o.cx + cos(a) * o.rad
+                    val oy = o.cy + sin(a) * o.rad
+                    if (oy < top || oy > bot) continue
+                    c.drawCircle(ox, oy, 17f, p)
+                }
+            }
+        }
+        val bs = sim.boss
+        if (bs != null && bs.state != Boss.DEAD) {
+            if (bpEsp) {
+                p.strokeWidth = 2f
+                p.color = 0xFFFFE57F.toInt()
+                brackets(c, bs.x - 60f, bs.y - 60f, bs.x + 60f, bs.y + 60f, 16f)
+            }
+            if (bpTracers) {
+                p.strokeWidth = 1.4f
+                p.color = withA(0xFFFFE57F.toInt(), 0x66)
+                c.drawLine(sim.px, sim.py, bs.x, bs.y, p)
+            }
+        }
+        p.strokeCap = Paint.Cap.BUTT
+        p.style = Paint.Style.FILL
+    }
+
+    /** Target ESP: вращающееся кольцо и световые хвосты вокруг босса. */
+    private fun drawTargetEsp(c: Canvas) {
+        val bs = sim.boss ?: return
+        if (!bpTEsp || !bpFxOn || scene != Scene.PLAY || bs.state == Boss.DEAD) return
+        val cx = bs.x
+        val cy = bs.y + 46f
+        rect.set(cx - 54f, cy - 16f, cx + 54f, cy + 16f)
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = 5f
+        p.color = withA(fxColor(0f), 0x46)
+        c.drawOval(rect, p)
+        p.strokeWidth = 2f
+        p.color = withA(fxColor(0f), 0xE6)
+        c.drawOval(rect, p)
+        p.style = Paint.Style.FILL
+        for (k in 0 until 3) {
+            val a0 = anim * 3f + k * 2.094f
+            val hgt = 20f + 16f * sin(anim * 2f + k * 2f)
+            for (j in 0 until 13) {
+                val ang = a0 - j * 0.12f
+                val f = 1f - j / 13f
+                p.color = withA(fxColor(k * 90f + j * 6f), (f * 230f).toInt())
+                c.drawCircle(cx + cos(ang) * 54f, cy + sin(ang) * 16f - hgt, 1.5f + 3f * f, p)
+            }
+        }
+    }
+
+    /** Ватермарк, список функций справа и карточка цели. Рисуется в виртуальных координатах. */
+    private fun drawRenderHud(c: Canvas) {
+        if (bpWater) {
+            fpsEma += ((1f / max(0.001f, lastDt)) - fpsEma) * 0.05f
+            val txt = "Tilcayo · ${fpsEma.toInt()} fps · ${(-minPy / 10f).toInt()} м"
+            tp.textSize = 11f
+            val tw = tp.measureText(txt) + 26f
+            panel(c, 12f, 8f, tw, 22f, 0xB0120A1A.toInt(), 11f)
+            p.style = Paint.Style.FILL
+            p.color = rainbow(0f)
+            c.drawCircle(23f, 19f, 3.2f, p)
+            text(c, txt, 32f, 23f, 11f, 0xFFFFFFFF.toInt(), Paint.Align.LEFT, shadow = false, maxW = tw)
+        }
+        if (bpRList) {
+            val act = ArrayList<String>()
+            for (pg in bpPages.take(4)) {
+                for (row in pg) {
+                    if (row.kind == 0 && row.get()) act.add(row.label.trimStart { !it.isLetterOrDigit() })
+                }
+            }
+            tp.textSize = 11f
+            act.sortByDescending { tp.measureText(it) }
+            var yy = 66f
+            for ((i, nm) in act.withIndex()) {
+                val tw = tp.measureText(nm) + 12f
+                p.style = Paint.Style.FILL
+                p.color = 0x66000000
+                c.drawRoundRect(W - 6f - tw, yy - 11f, W - 3f, yy + 4f, 4f, 4f, p)
+                p.color = rainbow(i * 28f)
+                c.drawRect(W - 4f, yy - 11f, W - 2.5f, yy + 4f, p)
+                text(c, nm, W - 10f, yy, 11f, rainbow(i * 28f), Paint.Align.RIGHT, shadow = false, maxW = tw)
+                yy += 17f
+            }
+        }
+        val bs = sim.boss
+        if (bpTHud && bs != null && bs.state != Boss.DEAD) {
+            val tgt = bs.hp.toFloat() / bs.hpMax
+            if (tgt > bossHpShown) bossHpShown = tgt else bossHpShown += (tgt - bossHpShown) * min(1f, lastDt * 4f)
+            val hx = 12f
+            val hy = viewH - 72f
+            panel(c, hx, hy, 176f, 52f, 0xCC120A1A.toInt(), 12f)
+            p.style = Paint.Style.FILL
+            p.color = 0x33FFFFFF
+            c.drawRoundRect(hx + 6f, hy + 6f, hx + 44f, hy + 44f, 9f, 9f, p)
+            text(c, "🐰", hx + 25f, hy + 34f, 24f, shadow = false)
+            text(c, "Котозаяц", hx + 52f, hy + 20f, 13f, 0xFFFFFFFF.toInt(), Paint.Align.LEFT, shadow = false, maxW = 118f)
+            val dist = (hypot(sim.px - bs.x, sim.py - bs.y) / 10f).toInt()
+            text(c, "${bs.hp}/${bs.hpMax} HP · $dist м", hx + 52f, hy + 33f, 10f, 0xAAFFFFFF.toInt(), Paint.Align.LEFT, shadow = false, maxW = 118f)
+            p.color = 0x33FFFFFF
+            c.drawRoundRect(hx + 52f, hy + 38f, hx + 170f, hy + 45f, 3.5f, 3.5f, p)
+            p.color = 0xFFFFD54F.toInt()
+            c.drawRoundRect(hx + 52f, hy + 38f, hx + 52f + 118f * bossHpShown.coerceIn(0f, 1f), hy + 45f, 3.5f, 3.5f, p)
+            p.shader = LinearGradient(hx + 52f, 0f, hx + 170f, 0f, rainbow(0f), rainbow(90f), Shader.TileMode.CLAMP)
+            c.drawRoundRect(hx + 52f, hy + 38f, hx + 52f + 118f * tgt.coerceIn(0f, 1f), hy + 45f, 3.5f, 3.5f, p)
+            p.shader = null
+        }
+    }
+
+    /** Уведомления о включении и выключении функций (в пикселях экрана). */
+    private fun drawNotifs(c: Canvas, dt: Float) {
+        if (notifs.isEmpty()) return
+        val d = resources.displayMetrics.density
+        val iter = notifs.iterator()
+        var idx = 0
+        while (iter.hasNext()) {
+            val n = iter.next()
+            n.age += dt
+            if (n.age > 2.6f) {
+                iter.remove()
+                continue
+            }
+            val inT = min(1f, n.age / 0.25f)
+            val al = min(1f, (2.6f - n.age) / 0.3f)
+            val e = inT * (2f - inT)
+            val w = 224f * d
+            val h = 46f * d
+            val x = width - (w + 12f * d) * e
+            val y = height - 150f * d - idx * (h + 8f * d)
+            bpRect.set(x, y, x + w, y + h)
+            p.style = Paint.Style.FILL
+            p.color = withA(0xFF120A1A.toInt(), (al * 235f).toInt())
+            c.drawRoundRect(bpRect, 14f * d, 14f * d, p)
+            val col = if (n.on) rainbow(0f) else 0xFF9A98AA.toInt()
+            p.color = withA(col, (al * 255f).toInt())
+            bpRect2.set(x + 8f * d, y + 8f * d, x + 38f * d, y + h - 8f * d)
+            c.drawRoundRect(bpRect2, 10f * d, 10f * d, p)
+            text(c, if (n.on) "✓" else "✕", x + 23f * d, y + h * 0.64f, 17f * d, withA(0xFF14060C.toInt(), (al * 255f).toInt()), shadow = false)
+            text(c, n.text, x + 46f * d, y + 20f * d, 14f * d, withA(0xFFFFFFFF.toInt(), (al * 255f).toInt()), Paint.Align.LEFT, shadow = false, maxW = w - 56f * d)
+            text(c, if (n.on) "Включено" else "Выключено", x + 46f * d, y + 35f * d, 11f * d, withA(col, (al * 255f).toInt()), Paint.Align.LEFT, shadow = false, maxW = w - 56f * d)
+            idx++
         }
     }
 
@@ -1877,6 +2620,7 @@ class GameView(context: Context) : View(context) {
             hsv[1] = 0.80f - 0.22f * t
             hsv[2] = 1f
         }
+        hsv[0] = (hsv[0] + bpUiHue) % 360f
         return android.graphics.Color.HSVToColor(alpha, hsv)
     }
 
@@ -1964,6 +2708,65 @@ class GameView(context: Context) : View(context) {
     }
 
     private fun drawBackground(c: Canvas, top: Int, bottom: Int, scroll: Float, withStars: Boolean = true) {
+        when (bpSky) {
+            1 -> drawBackgroundBase(c, 0xFF2B1055.toInt(), 0xFFFF7E5F.toInt(), scroll, withStars)
+            2 -> drawBackgroundBase(c, 0xFF020418.toInt(), 0xFF0B1E3F.toInt(), scroll, true)
+            3 -> drawBackgroundBase(c, 0xFF0B0221.toInt(), 0xFF2A0B4A.toInt(), scroll, true)
+            else -> drawBackgroundBase(c, top, bottom, scroll, withStars)
+        }
+        if (bpSky > 0) drawSkyDecor(c)
+    }
+
+    /** Солнце, луна и туманности для своего неба. */
+    private fun drawSkyDecor(c: Canvas) {
+        c.save()
+        c.scale(scale, scale)
+        p.style = Paint.Style.FILL
+        when (bpSky) {
+            1 -> {
+                val sx = W * 0.72f
+                val sy = viewH * 0.78f
+                p.shader = RadialGradient(
+                    sx, sy, 150f,
+                    intArrayOf(0xCCFFD27F.toInt(), 0x44FF8A5C, 0x00FF8A5C),
+                    floatArrayOf(0f, 0.35f, 1f), Shader.TileMode.CLAMP,
+                )
+                c.drawCircle(sx, sy, 150f, p)
+                p.shader = null
+                p.color = 0xFFFFE9B0.toInt()
+                c.drawCircle(sx, sy, 34f, p)
+            }
+            2 -> {
+                val mx = W * 0.25f
+                val my = viewH * 0.16f
+                p.color = 0x22FFFFFF
+                c.drawCircle(mx, my, 46f, p)
+                p.color = 0xFFF4F1E6.toInt()
+                c.drawCircle(mx, my, 26f, p)
+                p.color = 0x22000000
+                c.drawCircle(mx - 8f, my - 5f, 5f, p)
+                c.drawCircle(mx + 7f, my + 8f, 4f, p)
+                c.drawCircle(mx + 9f, my - 9f, 3f, p)
+            }
+            3 -> {
+                for (i in 0 until 3) {
+                    val nx = W * (0.2f + 0.3f * i) + sin(anim * 0.3f + i) * 30f
+                    val ny = viewH * (0.2f + 0.3f * i) + cos(anim * 0.25f + i) * 24f
+                    p.shader = RadialGradient(
+                        nx, ny, 130f,
+                        intArrayOf(withA(fxColor(i * 100f), 0x44), 0x00000000),
+                        null, Shader.TileMode.CLAMP,
+                    )
+                    c.drawCircle(nx, ny, 130f, p)
+                }
+                p.shader = null
+            }
+        }
+        p.shader = null
+        c.restore()
+    }
+
+    private fun drawBackgroundBase(c: Canvas, top: Int, bottom: Int, scroll: Float, withStars: Boolean = true) {
         val w = width.toFloat()
         val h = height.toFloat()
         p.style = Paint.Style.FILL
@@ -2259,6 +3062,28 @@ class GameView(context: Context) : View(context) {
             text(c, "🔥", cx - faceDir * w * 0.44f, cy + h * 0.14f, rad * 0.8f * fl, shadow = false)
             text(c, "🔥", cx + faceDir * w * 0.46f, cy + h * 0.2f, rad * 0.6f * (2f - fl), shadow = false)
         }
+        if (!hidden && bpWings) {
+            val wk = if (bpBig) bpBigSize else 1f
+            val flap = sin(anim * 7f) * 14f
+            p.style = Paint.Style.FILL
+            for (sd in intArrayOf(-1, 1)) {
+                for (fi in 0 until 3) {
+                    c.save()
+                    c.translate(cx + sd * w * 0.2f * wk, cy - h * 0.06f * wk)
+                    c.scale(sd.toFloat(), 1f)
+                    c.rotate(-(22f + fi * 24f + flap))
+                    rect.set(0f, -rad * 0.26f * wk, rad * (1.7f - fi * 0.25f) * wk, rad * 0.26f * wk)
+                    p.color = withA(fxColor(fi * 50f), 0x88)
+                    c.drawOval(rect, p)
+                    p.style = Paint.Style.STROKE
+                    p.strokeWidth = 1.2f
+                    p.color = 0xCCFFFFFF.toInt()
+                    c.drawOval(rect, p)
+                    p.style = Paint.Style.FILL
+                    c.restore()
+                }
+            }
+        }
         c.save()
         c.translate(cx, cy)
         c.rotate(rot + (if (bpSpin) anim * 540f else 0f))
@@ -2268,7 +3093,7 @@ class GameView(context: Context) : View(context) {
         if (hidden) {
             bmpPaint.colorFilter = silhouette
         } else {
-            bmpPaint.colorFilter = Skins.filter(skin, anim)
+            bmpPaint.colorFilter = if (bpCatRainbow || bpCatHue > 2f) catFilter(if (bpCatRainbow) (anim * 120f) % 360f else bpCatHue) else Skins.filter(skin, anim)
             bmpPaint.alpha = (sk.alpha * 255).toInt()
         }
         c.drawBitmap(bmp, null, rect, bmpPaint)
@@ -2277,6 +3102,26 @@ class GameView(context: Context) : View(context) {
         c.restore()
         if (hidden) return
 
+        val bk = if (bpBig) bpBigSize else 1f
+        if (bpHat > 0) text(c, bpHats[bpHat], cx - faceDir * w * 0.04f, cy - h * 0.5f * sy * bk, rad * 1.0f * bk, shadow = false)
+        if (bpOrbit > 0) {
+            for (oi in 0 until 3) {
+                val oa = anim * 2f + oi * 2.094f
+                text(c, bpOrbits[bpOrbit], cx + cos(oa) * w * 0.62f * bk, cy + sin(oa) * h * 0.3f * bk, rad * 0.5f * bk, shadow = false)
+            }
+        }
+        if (bpHalo) {
+            val hy = cy - h * 0.66f * sy * bk + sin(anim * 3f) * 2f
+            rect.set(cx - w * 0.2f * bk, hy - rad * 0.14f * bk, cx + w * 0.2f * bk, hy + rad * 0.14f * bk)
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = rad * 0.22f * bk
+            p.color = 0x55FFE082
+            c.drawOval(rect, p)
+            p.strokeWidth = rad * 0.09f * bk
+            p.color = 0xFFFFF3C4.toInt()
+            c.drawOval(rect, p)
+            p.style = Paint.Style.FILL
+        }
         val crown = level >= Balance.MAX_LEVEL && sk.acc != "👑"
         if (crown) text(c, "👑", cx + faceDir * w * 0.02f, cy - h * 0.46f * sy, rad * 0.95f, shadow = false)
         val acc = sk.acc
@@ -2812,12 +3657,12 @@ class GameView(context: Context) : View(context) {
             if (wx < v.x || wx > v.x + 210f || wy < v.y || wy > v.y + 118f) continue
             if (wx >= v.x + 186f && wy <= v.y + 22f) {
                 viruses.removeAt(i)
-                sfx.play(Sfx.S.CLICK)
+                sfxPlay(Sfx.S.CLICK)
                 performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
             } else if (wx in (v.x + 70f)..(v.x + 140f) && wy in (v.y + 88f)..(v.y + 110f)) {
                 // «ОК» только плодит новые окна
                 if (viruses.size < 6) virusSpawn()
-                sfx.play(Sfx.S.BUMP, 1.4f, 0.6f)
+                sfxPlay(Sfx.S.BUMP, 1.4f, 0.6f)
             }
             return true
         }
@@ -2980,7 +3825,7 @@ class GameView(context: Context) : View(context) {
             buttons.add(Btn(10f, y, 340f, 76f) {
                 save.mods = Mods.toggle(save.mods, md.id)
                 save.save()
-                sfx.play(Sfx.S.CLICK)
+                sfxPlay(Sfx.S.CLICK)
             })
         }
         val mul = Mods.multiplier(save.mods)
@@ -3055,6 +3900,7 @@ class GameView(context: Context) : View(context) {
     private fun drawHud(c: Canvas) {
         c.save()
         c.scale(scale, scale)
+        drawRenderHud(c)
         val m = (-minPy / 10f).toInt()
         if (mode == Mode.NORMAL) {
             text(c, "$m м", W / 2, 66f, 40f)
@@ -3139,7 +3985,7 @@ class GameView(context: Context) : View(context) {
         c.scale(ui, ui)
         p.color = 0xAA000000.toInt()
         c.drawRect(-uiOx / ui, -uiOy / ui, 360f + uiOx / ui, 800f + uiOy / ui, p)
-        text(c, "ПАУЗА", 180f, 230f, 48f)
+        neonTitle(c, "ПАУЗА", 180f, 230f, 48f)
         text(c, "ТАП — прыжок со стены, в воздухе — рывок вперёд", 180f, 262f, 12f, 0xCCFFFFFF.toInt(), maxW = 330f)
         text(c, "СВАЙП ← → в воздухе — рывок в сторону (хоть назад)", 180f, 280f, 12f, 0xCCFFFFFF.toInt(), maxW = 330f)
         btn(c, "▶  ПРОДОЛЖИТЬ", 50f, 300f, 260f, 64f, k(0xFF00C853)) { paused = false }
@@ -3160,7 +4006,7 @@ class GameView(context: Context) : View(context) {
         c.save()
         c.translate(0f, (1f - a) * 40f)
         panel(c, 24f, 150f, 312f, 430f, 0xEE231A3D.toInt(), 24f)
-        text(c, "УПС!", 180f, 205f, 44f, 0xFFFF8A80.toInt())
+        neonTitle(c, "УПС!", 180f, 205f, 44f)
         text(c, deathReason, 180f, 238f, 16f, 0xCCFFFFFF.toInt(), maxW = 280f)
 
         val score = (-minPy / 10f).toInt()
@@ -3199,6 +4045,7 @@ class GameView(context: Context) : View(context) {
 
         val lvl = save.level(save.selected)
         val bob = sin(anim * 2.5f)
+        menuAura(c, 180f, 345f + bob * 8f, 38f + lvl * 2.6f)
         drawTilcayo(c, 180f, 345f + bob * 8f, 38f + lvl * 2.6f, 1, bob * 4f, 1f + bob * 0.03f, 1f - bob * 0.03f, lvl, save.skinOf(save.selected))
         text(c, Balance.names[save.selected % Balance.names.size] + " · ур. $lvl", 180f, 440f, 19f, 0xFFFFF3C4.toInt())
 
@@ -3290,8 +4137,8 @@ class GameView(context: Context) : View(context) {
                 pet.tx = GX0 + rnd.nextFloat() * (GX1 - GX0)
                 pet.ty = GY0 + rnd.nextFloat() * (GY1 - GY0)
             }
-            x < 0.72f -> { hop(pet, 1 + rnd.nextInt(3)); sfx.play(Sfx.S.HOP, 0.9f + rnd.nextFloat() * 0.4f, 0.35f) }
-            x < 0.82f -> { flip(pet); sfx.play(Sfx.S.HOP, 1.3f, 0.4f) }
+            x < 0.72f -> { hop(pet, 1 + rnd.nextInt(3)); sfxPlay(Sfx.S.HOP, 0.9f + rnd.nextFloat() * 0.4f, 0.35f) }
+            x < 0.82f -> { flip(pet); sfxPlay(Sfx.S.HOP, 1.3f, 0.4f) }
             else -> { pet.st = Pet.IDLE; pet.t = 0.8f + rnd.nextFloat() * 1.8f }
         }
     }
@@ -3329,7 +4176,7 @@ class GameView(context: Context) : View(context) {
                             farmFoods.remove(food)
                             pet.st = Pet.EAT
                             pet.t = 0.9f
-                            sfx.play(Sfx.S.EAT)
+                            sfxPlay(Sfx.S.EAT)
                             uiPops.add(Pop(pet.x, pet.y - petRadius(i, pet) * 2.4f, "ням!", 0xFFFFAB91.toInt(), 18f))
                         } else if (food == null) {
                             pet.st = Pet.IDLE
@@ -3387,7 +4234,7 @@ class GameView(context: Context) : View(context) {
                             pet.gvy *= 0.7f
                             pet.spinV *= 0.55f
                             pet.squash = 1f
-                            sfx.play(Sfx.S.LAND, 0.8f + rnd.nextFloat() * 0.3f, 0.8f)
+                            sfxPlay(Sfx.S.LAND, 0.8f + rnd.nextFloat() * 0.3f, 0.8f)
                         } else {
                             pet.vz = 0f
                             val fr = max(0f, 1f - 5f * dt)
@@ -3460,7 +4307,7 @@ class GameView(context: Context) : View(context) {
             pet.spinV = 0f
             save.selected = dragIdx
             save.save()
-            sfx.play(Sfx.S.HOP, 1.4f, 0.6f)
+            sfxPlay(Sfx.S.HOP, 1.4f, 0.6f)
         }
         if (!dragMoved) return
         val rad = petRadius(dragIdx, pet)
@@ -3484,7 +4331,7 @@ class GameView(context: Context) : View(context) {
             save.selected = idx
             save.save()
             if (pet.st != Pet.HOP && pet.st != Pet.FLIP) { if (rnd.nextInt(3) == 0) flip(pet) else hop(pet, 2) }
-            sfx.play(Sfx.S.HOP, 1.1f, 0.6f)
+            sfxPlay(Sfx.S.HOP, 1.1f, 0.6f)
             uiPops.add(Pop(pet.x, pet.y - petRadius(idx, pet) * 2.4f, "💛", 0xFFFFFFFF.toInt(), 22f))
             return
         }
@@ -3511,7 +4358,7 @@ class GameView(context: Context) : View(context) {
             pet.vz = (-vy * 0.7f + 30f).coerceIn(-200f, 620f)
             pet.spinV = (vx * 0.9f).coerceIn(-900f, 900f)
             if (speed > 700f) pet.dizzy = 1.6f
-            sfx.play(Sfx.S.THROW, 0.8f + min(0.8f, speed / 1200f), 0.6f)
+            sfxPlay(Sfx.S.THROW, 0.8f + min(0.8f, speed / 1200f), 0.6f)
         }
     }
 
@@ -3707,7 +4554,7 @@ class GameView(context: Context) : View(context) {
         btn(c, "СОБРАТЬ", 196f, 76f, 148f, 40f, k(0xFFFFA000), enabled = pend > 0) {
             val got = save.collect()
             toast("Собрано +$got 💰")
-            sfx.play(Sfx.S.BUY)
+            sfxPlay(Sfx.S.BUY)
         }
         if (pend > 0) text(c, "+$pend", 270f, 70f, 13f, 0xFFFFE082.toInt())
 
@@ -3754,7 +4601,7 @@ class GameView(context: Context) : View(context) {
                 if (save.unlockFarm()) {
                     viewFarm = save.activeFarm
                     farmFoods.clear()
-                    sfx.play(Sfx.S.LEVEL)
+                    sfxPlay(Sfx.S.LEVEL)
                     toast("Ферма «${th.name}» открыта! 🎉")
                     for (n in 0 until 30) {
                         val a = rnd.nextFloat() * 2f * PI.toFloat()
@@ -3815,7 +4662,7 @@ class GameView(context: Context) : View(context) {
         save.coins -= f.cost
         save.herd[i] = min(Balance.MAX_FAT, save.herd[i] + f.fat)
         save.save()
-        sfx.play(Sfx.S.BUY)
+        sfxPlay(Sfx.S.BUY)
         val pet = pets.getOrNull(i) ?: return
         farmFoods.add(
             FarmFood(
@@ -3827,7 +4674,7 @@ class GameView(context: Context) : View(context) {
         )
         val after = save.level(i)
         if (after > before) {
-            sfx.play(Sfx.S.LEVEL)
+            sfxPlay(Sfx.S.LEVEL)
             toast("Уровень $after! Тилкайо стал жирнее 😋")
             uiPops.add(Pop(180f, 280f, "УРОВЕНЬ $after!", 0xFFFFD54F.toInt(), 34f))
             for (n in 0 until 24) {
@@ -3850,7 +4697,7 @@ class GameView(context: Context) : View(context) {
         save.coins -= cost
         save.breedEnd = System.currentTimeMillis() + Balance.breedMs(n)
         save.save()
-        sfx.play(Sfx.S.BUY)
+        sfxPlay(Sfx.S.BUY)
         toast("Малыш родится через ${Balance.breedMs(n) / 60000} мин 💕")
         val par = pets.getOrNull(save.selected)
         if (par != null) uiPops.add(Pop(par.x, par.y - 70f, "💕", 0xFFF48FB1.toInt(), 30f))
@@ -3877,7 +4724,7 @@ class GameView(context: Context) : View(context) {
         save.save()
         boxStage = 1
         boxT = 0f
-        sfx.play(Sfx.S.BOX)
+        sfxPlay(Sfx.S.BOX)
     }
 
     private fun drawWardrobe(c: Canvas, dt: Float) {
@@ -3946,7 +4793,7 @@ class GameView(context: Context) : View(context) {
                 if (owned) {
                     save.setSkin(sel, i)
                     save.save()
-                    sfx.play(Sfx.S.BUY)
+                    sfxPlay(Sfx.S.BUY)
                     toast("Надет скин «${sk.name}»")
                 } else {
                     toast("Скин пока не выпал — открывай боксы!")
@@ -3990,7 +4837,7 @@ class GameView(context: Context) : View(context) {
             if (boxT >= 1.8f) {
                 boxStage = 2
                 boxT = 0f
-                sfx.play(when (sk.rarity) { 0 -> Sfx.S.REVEAL_C; 1 -> Sfx.S.REVEAL_R; 2 -> Sfx.S.REVEAL_E; else -> Sfx.S.REVEAL_L })
+                sfxPlay(when (sk.rarity) { 0 -> Sfx.S.REVEAL_C; 1 -> Sfx.S.REVEAL_R; 2 -> Sfx.S.REVEAL_E; else -> Sfx.S.REVEAL_L })
                 performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 val n = 20 + sk.rarity * 20
                 for (j in 0 until n) {

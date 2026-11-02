@@ -29,6 +29,7 @@ class HalloweenMusic {
     @Volatile private var want = false
     @Volatile private var released = false
     @Volatile private var started = false
+    @Volatile private var vol = 0.55f
     private var track: AudioTrack? = null
     private val lock = Any()
 
@@ -58,7 +59,7 @@ class HalloweenMusic {
                         .build()
                     t.write(pcm, 0, pcm.size)
                     t.setLoopPoints(0, pcm.size, -1)
-                    t.setVolume(0.55f)
+                    t.setVolume(vol)
                     track = t
                     if (want) t.play()
                 }
@@ -67,6 +68,17 @@ class HalloweenMusic {
         th.isDaemon = true
         th.name = "halloween-music"
         th.start()
+    }
+
+    /** Громкость музыки 0..1. */
+    fun setVolume(v: Float) {
+        vol = v.coerceIn(0f, 1f)
+        synchronized(lock) {
+            try {
+                track?.setVolume(vol)
+            } catch (ex: Exception) {
+            }
+        }
     }
 
     fun setPlaying(on: Boolean) {
